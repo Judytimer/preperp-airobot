@@ -18,9 +18,9 @@ test("tracks client identity before ack, partial fills, and duplicate fill ids",
 
 test("only reaches CANCELED after a matching venue cancel acknowledgment", () => {
   const tracker = submitted();
-  tracker.processAck(ack());
   assert.equal(tracker.requestCancelOpenOrders()[0]?.status, "CANCEL_REQUESTED");
   tracker.processCancelAck(cancelAck());
+  assert.equal(tracker.get("CLIENT-1")?.exchangeOrderId, "SIM-1");
   assert.equal(tracker.get("CLIENT-1")?.status, "CANCELED");
   assert.equal(tracker.processFill(fill("LATE", 0.01)).accepted, false);
 });

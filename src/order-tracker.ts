@@ -96,7 +96,7 @@ export class InFlightOrderTracker {
   requestCancelOpenOrders(): InFlightOrder[] {
     const requested: InFlightOrder[] = [];
     for (const tracked of this.orders.values()) {
-      if (["ACKED", "PARTIALLY_FILLED"].includes(tracked.order.status)) {
+      if (["SUBMITTED", "ACKED", "PARTIALLY_FILLED"].includes(tracked.order.status)) {
         tracked.order = { ...tracked.order, status: "CANCEL_REQUESTED" };
         requested.push({ ...tracked.order });
       }
@@ -109,10 +109,17 @@ export class InFlightOrderTracker {
     if (tracked.order.status !== "CANCEL_REQUESTED") {
       throw new Error(`order ${ack.clientOrderId} is not awaiting cancel confirmation`);
     }
-    if (tracked.order.exchangeOrderId !== ack.exchangeOrderId) {
+    if (
+      tracked.order.exchangeOrderId !== null &&
+      tracked.order.exchangeOrderId !== ack.exchangeOrderId
+    ) {
       throw new Error(`cancel acknowledgment does not match order ${ack.clientOrderId}`);
     }
-    tracked.order = { ...tracked.order, status: "CANCELED" };
+    tracked.order = {
+      ...tracked.order,
+      exchangeOrderId: ack.exchangeOrderId,
+      status: "CANCELED"
+    };
     return { ...tracked.order };
   }
 

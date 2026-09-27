@@ -11,7 +11,8 @@ export type ExecutionEventHandler = (event: ExecutionEvent) => void | Promise<vo
 /** Command boundary. Executions are delivered only through the registered event handler. */
 export interface ExecutionVenue {
   onExecutionEvent(handler: ExecutionEventHandler): void;
-  submit(command: SubmitOrderCommand): Promise<OrderAck>;
+  /** Completion only reports that the transport command finished; ACK is an ExecutionEvent fact. */
+  submit(command: SubmitOrderCommand): Promise<void>;
   requestCancel(clientOrderId: string): Promise<void>;
 }
 
@@ -48,7 +49,7 @@ export class SimulatedExchange implements ExecutionVenue {
     this.handler = handler;
   }
 
-  async submit(command: SubmitOrderCommand): Promise<OrderAck> {
+  async submit(command: SubmitOrderCommand): Promise<void> {
     const exchangeOrderId = `SIM-${this.nextExchangeOrderId++}`;
     this.orders.set(command.clientOrderId, {
       exchangeOrderId,
@@ -65,7 +66,6 @@ export class SimulatedExchange implements ExecutionVenue {
     };
     await this.emit({ type: "ORDER_ACK", ack });
     this.scheduleFills(command, exchangeOrderId);
-    return ack;
   }
 
   async requestCancel(clientOrderId: string): Promise<void> {

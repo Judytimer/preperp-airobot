@@ -4,9 +4,65 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { PerpBot } from "../src/bot.ts";
 import { SimulatedExchange } from "../src/exchange.ts";
-import type { FillDelay, FillPlanStep } from "../src/exchange.ts";
+import type { ExecutionEventHandler, ExecutionVenue, FillDelay, FillPlanStep } from "../src/exchange.ts";
 import type { BotCheckpoint, BotStateStore } from "../src/state-store.ts";
-import type { Tick } from "../src/types.ts";
+import type { SubmitOrderCommand, Tick } from "../src/types.ts";
+
+test("persists SUBMITTED before crossing the venue boundary", async () => {
+  const store = new DeferredSaveStateStore();
+  const venue = new ManualAckVenue();
+  const bot = new PerpBot({
+    symbol: "BTC-PERP",
+    shortWindow: 2,
+    longWindow: 4,
+    orderQty: 0.01,
+    maxAbsPosition: 0.03,
+    stateStore: store,
+    venue,
+    logger: () => {}
+  });
+
+  for (const [index, price] of [100, 101, 102].entries()) {
+    await bot.onTick(tick(index + 1, price));
+  }
+  const actionableTick = bot.onTick(tick(4, 103));
+  await store.saveStarted;
+
+  assert.equal(venue.submissions.length, 0);
+  assert.equal(store.pendingCheckpoint?.orderTrackerState.orders[0]?.order.status, "SUBMITTED");
+  assert.equal(store.pendingCheckpoint?.orderTrackerState.orders[0]?.order.exchangeOrderId, null);
+
+  store.releaseSave();
+  await actionableTick;
+  assert.equal(venue.submissions.length, 1);
+});
+
+test("submit command completion does not acknowledge the order", async () => {
+  const store = new MemoryStateStore();
+  const venue = new ManualAckVenue();
+  const bot = new PerpBot({
+    symbol: "BTC-PERP",
+    shortWindow: 2,
+    longWindow: 4,
+    orderQty: 0.01,
+    maxAbsPosition: 0.03,
+    stateStore: store,
+    venue,
+    logger: () => {}
+  });
+
+  for (const [index, price] of [100, 101, 102, 103].entries()) {
+    await bot.onTick(tick(index + 1, price));
+  }
+
+  assert.equal(venue.submissions.length, 1);
+  assert.equal(store.get()?.orderTrackerState.orders[0]?.order.status, "SUBMITTED");
+  assert.equal(store.get()?.orderTrackerState.orders[0]?.order.exchangeOrderId, null);
+
+  await venue.publishAck("VENUE-1");
+  assert.equal(store.get()?.orderTrackerState.orders[0]?.order.status, "ACKED");
+  assert.equal(store.get()?.orderTrackerState.orders[0]?.order.exchangeOrderId, "VENUE-1");
+});
 
 test("runs signal -> risk -> ack -> delayed fill -> position update", async () => {
   const ticks: Tick[] = [
@@ -381,6 +437,67 @@ class MemoryStateStore implements BotStateStore {
   get(): BotCheckpoint | null {
     return this.checkpoint === null ? null : structuredClone(this.checkpoint);
   }
+}
+
+class DeferredSaveStateStore implements BotStateStore {
+  pendingCheckpoint: BotCheckpoint | null = null;
+  private readonly saveStartedGate = deferred();
+  private readonly saveReleaseGate = deferred();
+  readonly saveStarted = this.saveStartedGate.promise;
+
+  async load(): Promise<BotCheckpoint | null> {
+    return null;
+  }
+
+  async save(checkpoint: BotCheckpoint): Promise<void> {
+    this.pendingCheckpoint = structuredClone(checkpoint);
+    this.saveStartedGate.resolve();
+    await this.saveReleaseGate.promise;
+  }
+
+  releaseSave(): void {
+    this.saveReleaseGate.resolve();
+  }
+}
+
+class ManualAckVenue implements ExecutionVenue {
+  readonly submissions: SubmitOrderCommand[] = [];
+  private handler: ExecutionEventHandler | undefined;
+
+  onExecutionEvent(handler: ExecutionEventHandler): void {
+    this.handler = handler;
+  }
+
+  async submit(command: SubmitOrderCommand): Promise<void> {
+    this.submissions.push(structuredClone(command));
+  }
+
+  async requestCancel(): Promise<void> {}
+
+  async publishAck(exchangeOrderId: string): Promise<void> {
+    const command = this.submissions[0];
+    if (command === undefined || this.handler === undefined) {
+      throw new Error("cannot publish ACK before submission and handler registration");
+    }
+    await this.handler({
+      type: "ORDER_ACK",
+      ack: {
+        clientOrderId: command.clientOrderId,
+        exchangeOrderId,
+        status: "ACKED",
+        request: command.request,
+        ts: command.request.ts
+      }
+    });
+  }
+}
+
+function deferred(): { promise: Promise<void>; resolve(): void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
 }
 
 function unresolvedCheckpoint(): BotCheckpoint {
