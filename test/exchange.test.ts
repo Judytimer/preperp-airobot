@@ -4,15 +4,14 @@ import test from "node:test";
 import { SimulatedExchange } from "../src/exchange.ts";
 import type { ExecutionEvent } from "../src/types.ts";
 
-test("submit result is decoupled from a later execution event", async () => {
+test("submit completion carries no acknowledgment fact", async () => {
   const exchange = new SimulatedExchange(20);
   const events: ExecutionEvent[] = [];
   exchange.onExecutionEvent((event) => events.push(event));
 
-  const ack = await exchange.submit(command("CLIENT-1"));
+  const completion = await exchange.submit(command("CLIENT-1"));
 
-  assert.equal(ack.clientOrderId, "CLIENT-1");
-  assert.equal(ack.exchangeOrderId, "SIM-1");
+  assert.equal(completion, undefined);
   assert.deepEqual(events.map((event) => event.type), ["ORDER_ACK"]);
   await exchange.drain();
   assert.deepEqual(events.map((event) => event.type), ["ORDER_ACK", "FILL"]);
@@ -25,9 +24,9 @@ test("client identity exists before the venue assigns its identity", async () =>
   const submitted = command("OWNED-BEFORE-SUBMIT");
 
   assert.equal(submitted.clientOrderId, "OWNED-BEFORE-SUBMIT");
-  const ack = await exchange.submit(submitted);
-  assert.equal(ack.clientOrderId, submitted.clientOrderId);
-  assert.equal(ack.exchangeOrderId, "SIM-1");
+  await exchange.submit(submitted);
+  assert.equal(seen[0]?.type === "ORDER_ACK" && seen[0].ack.clientOrderId, submitted.clientOrderId);
+  assert.equal(seen[0]?.type === "ORDER_ACK" && seen[0].ack.exchangeOrderId, "SIM-1");
   await exchange.drain();
   assert.equal(seen[1]?.type === "FILL" && seen[1].fill.clientOrderId, submitted.clientOrderId);
 });
