@@ -39,7 +39,7 @@
 
 这些缺口**不是周一 local simulator 闭环的阻塞项**，但是真实 Binance 接入前的 gate：
 
-1. `submit()` 的返回类型仍是 `Promise<OrderAck>`，同时又发 `ORDER_ACK` event；Bot 实际只消费 event，返回 ACK 是重复通道。真实 adapter 应选定 event 为事实入口，command completion 只表达“调用已完成/结果未知”，避免两套 ACK ownership。
+1. 此前 `submit()` return 与 `ORDER_ACK` event 存在双 ACK contract；当前已收口为 command completion 与 venue fact 分离，`submit(): Promise<void>`，`ORDER_ACK` event 是唯一 ACK fact path。
 2. 没有 `REJECTED / EXPIRED / UNKNOWN`，也没有“进程仍活着但 submit timeout”的运行态 gate。当前 checkpoint 只会在**重启后**将 unresolved order 变成 `RECOVERY_REQUIRED`。
 3. `processFill()` 要求先有 matching exchange order ID，因此不能处理“user stream Fill 先于 REST ACK 被本地观察到”的乱序；当前测试的 out-of-order 是不同订单之间乱序，不是同一订单的 Fill-before-ACK。
 4. `CANCELED` 后的新权威 Fill 被静默拒绝。模拟器会在 cancel 后抑制未执行 Fill，所以现有闭环不会触发真实 cancel/fill race；真实 connector 需要 terminal-order retention、trade-ID 幂等以及 quarantine/reconciliation，而不是把 SDK 状态直接塞进 Position。
@@ -174,7 +174,7 @@ Fill -> Position ledger -> Projected Position -> Margin/Risk
 
 ## 6. 最应该砍掉或简化的 1～3 处
 
-1. **砍掉未来真实 adapter 中“双 ACK 通道”的可能性**：保留 event 作为唯一订单事实入口；command 的 Promise 不再同时充当第二份权威 ACK。当前 simulator 为避免扰动闭环先不改。
+1. **已砍掉双 ACK 通道**：当前 simulator 与 `ExecutionVenue` 均以 event 作为唯一订单 ACK 事实入口；command Promise 只表达 transport/command completion。
 2. **砍掉固定 `round(8)` 充当 exchange precision model 的想象**：paper 阶段保留这个小工具；真实 adapter 到来时，把 precision/filter/decimal 收拢到一个薄 normalization boundary，而不是继续把 round 散落到领域代码。
 3. **砍掉“每个入口手写 shape parser”的增长趋势**：现有校验保持不动；新增真实 REST/WS payload 时只在 ingress 用 Zod，解析后立即转换成项目 canonical types，不把 Zod schema 或 vendor DTO 传播到 Order/Risk/Position。
 
