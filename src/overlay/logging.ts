@@ -3,7 +3,10 @@ import type {
   OverlayRiskDecision,
   OverlaySignal,
   PredictionPosition,
-  ResearchSnapshot
+  ResearchPlan,
+  ResearchSnapshot,
+  ShadowResult,
+  TradeCandidate
 } from "./types.ts";
 
 export function formatResearch(snapshot: ResearchSnapshot): string {
@@ -12,6 +15,18 @@ export function formatResearch(snapshot: ResearchSnapshot): string {
 
 export function formatOverlaySignal(signal: OverlaySignal): string {
   return `[OVERLAY_SIGNAL] action=${signal.action} yes=${signal.yesPrice} reason="${signal.reason}"`;
+}
+
+export function formatTradeCandidate(candidate: TradeCandidate): string {
+  return `[TRADE_CANDIDATE] id=${candidate.candidateId} t0=${candidate.t0} market=${candidate.signal.marketId} action=${candidate.signal.action}`;
+}
+
+export function formatResearchPlan(plan: ResearchPlan, evidenceCount: number): string {
+  return `[RESEARCH_PLAN] candidateId=${plan.candidateId} sources=${plan.sources.join(",")} window=${plan.windowStart}:${plan.windowEnd} evidence=${evidenceCount}`;
+}
+
+export function formatShadowResult(candidateId: string, result: ShadowResult): string {
+  return `[SHADOW_REVIEW] mode=SHADOW executionAuthority=false candidateId=${candidateId} verdict=${result.verdict} moveValidity=${result.moveValidity} sourceAgreement=${result.sourceAgreement} catalystSupport=${result.catalystSupport} entryQuality=${result.entryQuality} mispricingConfidence=${result.mispricingConfidence} resolutionRisk=${result.resolutionRisk} dataQuality=${result.dataQuality} evidenceSourceIds=${result.evidenceSourceIds.join(",")} reason="${result.reason}"`;
 }
 
 export function formatOverlayRisk(decision: OverlayRiskDecision): string {
