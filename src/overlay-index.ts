@@ -1,7 +1,14 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { MemePredictionOverlayBot } from "./overlay/bot.ts";
-import { MockResearchContext } from "./overlay/research.ts";
+import { formatShadowRecord } from "./overlay/logging.ts";
+import {
+  DeterministicResearchRouter,
+  DeterministicStrategyReviewer,
+  MockEvidenceSearch,
+  MockResearchContext
+} from "./overlay/research.ts";
+import { BoundedShadowRunner } from "./overlay/shadow-runner.ts";
 import type { ResearchSnapshot } from "./overlay/types.ts";
 
 const snapshots: ResearchSnapshot[] = [
@@ -14,11 +21,32 @@ const snapshots: ResearchSnapshot[] = [
 ];
 
 const research = new MockResearchContext(snapshots);
+const shadowRunner = new BoundedShadowRunner({
+  router: new DeterministicResearchRouter(),
+  search: new MockEvidenceSearch(),
+  reviewer: new DeterministicStrategyReviewer({
+    verdict: "ABSTAIN",
+    confidence: 0.4,
+    moveValidity: "INSUFFICIENT_SOURCE",
+    moveDecomposition: ["MOMENTUM", "UNKNOWN"],
+    sourceAgreement: "INSUFFICIENT",
+    evidenceSourceIds: [],
+    reason: "deterministic demo has insufficient evidence",
+    catalystSupport: "UNKNOWN",
+    entryQuality: "MEDIUM",
+    mispricingConfidence: "LOW",
+    resolutionRisk: "UNKNOWN",
+    dataQuality: "LOW"
+  }),
+  record: (record) => console.log(formatShadowRecord(record)),
+  maxInFlight: 2
+});
 const bot = new MemePredictionOverlayBot({
   spotRiseTriggerPct: 0.5,
   exitYesPrice: 0.7,
   maxRiskBudget: 100,
-  fillDelayMs: 120
+  fillDelayMs: 120,
+  shadowRunner
 });
 
 for (let index = 0; index < 4; index++) {
@@ -30,6 +58,7 @@ while (await processNextSnapshot()) {
   // Consume the remaining mock research snapshots.
 }
 await bot.waitForIdle();
+await shadowRunner.drain(1_000);
 
 console.log("[OVERLAY_DONE]", bot.getPosition());
 

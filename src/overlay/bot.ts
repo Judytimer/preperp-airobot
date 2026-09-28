@@ -9,12 +9,18 @@ import {
   formatOverlayRisk,
   formatOverlaySignal,
   formatPending,
-  formatResearch
+  formatResearch,
+  formatTradeCandidate
 } from "./logging.ts";
 import { PredictionPositionBook } from "./position.ts";
 import { OverlayRiskManager } from "./risk.ts";
 import { MemePredictionOverlayStrategy } from "./strategy.ts";
-import type { PredictionPosition, ResearchSnapshot } from "./types.ts";
+import type {
+  PredictionPosition,
+  ResearchSnapshot,
+  ShadowRunner,
+  TradeCandidate
+} from "./types.ts";
 
 export type MemePredictionOverlayBotConfig = {
   spotRiseTriggerPct: number;
@@ -22,6 +28,7 @@ export type MemePredictionOverlayBotConfig = {
   maxRiskBudget: number;
   fillDelayMs: FillDelay;
   logger?: Logger;
+  shadowRunner?: ShadowRunner;
 };
 
 export class MemePredictionOverlayBot {
@@ -29,6 +36,7 @@ export class MemePredictionOverlayBot {
   private readonly risk: OverlayRiskManager;
   private readonly exchange: SimulatedExchange;
   private readonly logger: Logger;
+  private readonly shadowRunner: ShadowRunner | undefined;
   private readonly pendingOrders = new Map<string, OrderRequest>();
   private nextClientOrderId = 1;
   private positionBook: PredictionPositionBook | null = null;
@@ -38,6 +46,7 @@ export class MemePredictionOverlayBot {
     this.risk = new OverlayRiskManager({ maxRiskBudget: config.maxRiskBudget });
     this.exchange = new SimulatedExchange(config.fillDelayMs);
     this.logger = config.logger ?? console.log;
+    this.shadowRunner = config.shadowRunner;
     this.exchange.onExecutionEvent((event) => this.onExecutionEvent(event));
   }
 
@@ -55,6 +64,22 @@ export class MemePredictionOverlayBot {
 
     const signal = this.strategy.onSnapshot(snapshot, projectedShares);
     this.logger(formatOverlaySignal(signal));
+    if (signal.action === "BUY_YES") {
+      const candidate: TradeCandidate = {
+        candidateId: `${signal.marketId}:${snapshot.seq}`,
+        t0: signal.ts,
+        snapshot: structuredClone(snapshot),
+        signal
+      };
+      this.logger(formatTradeCandidate(candidate));
+      try {
+        this.shadowRunner?.start(candidate);
+      } catch {
+        // Even a broken ShadowRunner implementation cannot block Risk or Execution.
+      }
+      // Current SHADOW safety boundary: AI reviews entries only and has no execution
+      // authority. Deterministic exits bypass review; this is not a permanent strategy rule.
+    }
     const decision = this.risk.evaluate(signal, projectedShares);
     this.logger(formatOverlayRisk(decision));
     if (!decision.approved) {

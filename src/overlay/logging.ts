@@ -3,7 +3,9 @@ import type {
   OverlayRiskDecision,
   OverlaySignal,
   PredictionPosition,
-  ResearchSnapshot
+  ResearchSnapshot,
+  ShadowRecord,
+  TradeCandidate
 } from "./types.ts";
 
 export function formatResearch(snapshot: ResearchSnapshot): string {
@@ -12,6 +14,20 @@ export function formatResearch(snapshot: ResearchSnapshot): string {
 
 export function formatOverlaySignal(signal: OverlaySignal): string {
   return `[OVERLAY_SIGNAL] action=${signal.action} yes=${signal.yesPrice} reason="${signal.reason}"`;
+}
+
+export function formatTradeCandidate(candidate: TradeCandidate): string {
+  return `[TRADE_CANDIDATE] id=${candidate.candidateId} t0=${candidate.t0} market=${candidate.signal.marketId} action=${candidate.signal.action}`;
+}
+
+export function formatShadowRecord(record: ShadowRecord): string {
+  if (record.status === "COMPLETED") {
+    return `[SHADOW_RECORD] mode=SHADOW executionAuthority=false candidateId=${record.candidateId} status=${record.status} verdict=${record.shadowVerdict} moveValidity=${record.result.moveValidity} sourceAgreement=${record.result.sourceAgreement} evidenceSourceIds=${record.result.evidenceSourceIds.join(",")}`;
+  }
+  if (record.status === "PROVIDER_UNAVAILABLE" || record.status === "PROVIDER_FAILED") {
+    return `[SHADOW_RECORD] mode=SHADOW executionAuthority=false candidateId=${record.candidateId} status=${record.status} errorCode=${record.errorCode}`;
+  }
+  return `[SHADOW_RECORD] mode=SHADOW executionAuthority=false candidateId=${record.candidateId} status=${record.status}`;
 }
 
 export function formatOverlayRisk(decision: OverlayRiskDecision): string {
