@@ -1,7 +1,11 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { MemePredictionOverlayBot } from "./overlay/bot.ts";
-import { MockResearchContext } from "./overlay/research.ts";
+import {
+  DeterministicResearchRouter,
+  DeterministicStrategyReviewer,
+  MockResearchContext
+} from "./overlay/research.ts";
 import type { ResearchSnapshot } from "./overlay/types.ts";
 
 const snapshots: ResearchSnapshot[] = [
@@ -18,7 +22,25 @@ const bot = new MemePredictionOverlayBot({
   spotRiseTriggerPct: 0.5,
   exitYesPrice: 0.7,
   maxRiskBudget: 100,
-  fillDelayMs: 120
+  fillDelayMs: 120,
+  shadow: {
+    router: new DeterministicResearchRouter(),
+    context: research,
+    reviewer: new DeterministicStrategyReviewer({
+      verdict: "ABSTAIN",
+      confidence: 0.4,
+      moveValidity: "INSUFFICIENT_SOURCE",
+      moveDecomposition: ["MOMENTUM", "UNKNOWN"],
+      sourceAgreement: "INSUFFICIENT",
+      evidenceSourceIds: [],
+      reason: "deterministic demo has no external evidence",
+      catalystSupport: "UNKNOWN",
+      entryQuality: "MEDIUM",
+      mispricingConfidence: "LOW",
+      resolutionRisk: "UNKNOWN",
+      dataQuality: "LOW"
+    })
+  }
 });
 
 for (let index = 0; index < 4; index++) {
