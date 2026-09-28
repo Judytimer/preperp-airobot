@@ -1,6 +1,6 @@
 # Minimal Perp Quant Bot
 
-一个只跑本地模拟的 TypeScript + Node.js 永续合约量化机器人。它不连接交易所、不碰真钱、不做 UI，也不是完整回测框架。
+一个以本地 paper 模拟为默认模式的 TypeScript + Node.js 永续合约量化机器人，并提供 Binance USDⓈ-M Futures Testnet 实验入口。它不碰真钱、不做 UI，也不是完整回测框架。
 
 ## 数据流
 
@@ -18,7 +18,7 @@ ExecutionVenue event callback
 
 风控使用 `已成交 Position + unresolved Orders` 计算预计仓位，避免 Fill 延迟期间重复下单。Core 在 submit 前生成并跟踪 `clientOrderId`；adapter 后续提供独立的 `exchangeOrderId`。命令结果不携带 future Fill，Fill/CancelAck 只通过 execution event callback 进入状态机。
 
-订单生命周期由 `InFlightOrderTracker` 持有：成交路径为 `SUBMITTED -> ACKED -> PARTIALLY_FILLED -> FILLED`；撤单路径为 `ACKED/PARTIALLY_FILLED -> CANCEL_REQUESTED -> CANCELED`。只有 venue execution event 中的 `CancelAck` 才能确认 `CANCELED`。发生 Partial Fill 后，预计仓位使用已成交 Position 加订单 `remainingQty`，不会把整张原始订单重复计入，也不会过早移除 Pending。
+订单生命周期由 `InFlightOrderTracker` 持有：成交路径为 `SUBMITTED -> ACKED -> PARTIALLY_FILLED -> FILLED`；撤单路径为 `SUBMITTED/ACKED/PARTIALLY_FILLED -> CANCEL_REQUESTED -> CANCELED`。只有 venue execution event 中的 `CancelAck` 才能确认 `CANCELED`。发生 Partial Fill 后，预计仓位使用已成交 Position 加订单 `remainingQty`，不会把整张原始订单重复计入，也不会过早移除 Pending。
 
 第二轮加入了最小逐仓保证金账户。行情明确区分 `lastPrice / markPrice / indexPrice`：Baseline 双均线和模拟订单价格只使用 last，逐仓账户、未实现盈亏与强平触发只使用 mark，index 目前仅代表外部参考输入；本模拟器没有实现交易所级 mark-price 推导。强平触发与执行已分开建模，但当前 paper simplification 仍假设 `liquidation execution price = mark price`，日志会同时记录 trigger mark 与 execution price。下单前检查目标仓位初始保证金，`equity <= maintenanceMargin` 时模拟强平、向 exchange 发起 cancel request，并在 CancelAck 后确认 `CANCELED`，然后停止策略继续下单。它仍然只是 paper model，不代表真实交易所清算流程。
 
@@ -43,6 +43,14 @@ npm run replay
 FORMAL candidate selection 使用纯函数寻找 event release 后、固定 cutoff 前的第一个 actionable MA crossover；HOLD/FLAT → LONG/SHORT 有效，warm-up 后的首个 signal 不算 crossover。Baseline Candidate Outcome 固定为 T0 close 零延迟 paper 成交后持有 15 分钟，并以方向收益 `±50bps` 判定 SUCCESS/FAILURE，中间为 NEUTRAL；结束时间必须严格早于下一 independent catalyst。Baseline 与 Shadow counterfactual 使用同一成交假设，不建模 slippage、next-open 或 order book。样本仅研究 post-event 能产生 actionable crossover 的条件事件，不能解释为 AI alpha 或 unconditional event performance。当前这些规则只有 synthetic DEMO burn-in，尚未把缺失的 raw artifacts 包装成 FORMAL case。
 
 ## 运行
+
+首次拉取包含 Testnet connector 的版本后先安装依赖：
+
+```bash
+npm install
+```
+
+默认本地 paper 运行：
 
 ```bash
 npm start
@@ -70,6 +78,26 @@ npm test
 
 测试覆盖了核心闭环：价格 tick 触发双均线信号，风控批准订单，模拟交易所先 ACK，延迟 Fill 后更新 Position；也覆盖 projected position、乱序 Fill、目标仓位 delta 和跨零 Partial Fill。
 
+## Binance USDⓈ-M Futures Testnet
+
+第一条真实 venue 边界使用 Binance 官方模块化 TypeScript connector，并在代码里固定为 Testnet URL。策略和 Core 不调用 SDK；adapter 只负责真实行情、symbol filter 预检、下单/撤单 transport，以及把 user-data `ORDER_TRADE_UPDATE` 翻译为现有 `ACK / Fill / CancelAck`。
+
+无凭证的只读行情 smoke（不会下单）：
+
+```bash
+npm run testnet:market
+```
+
+有 Binance Futures Testnet key 后运行 12 个真实行情 tick 的最小执行闭环：
+
+```powershell
+$env:BINANCE_TESTNET_API_KEY = "..."
+$env:BINANCE_TESTNET_API_SECRET = "..."
+npm run testnet
+```
+
+Testnet runner 要求账户使用 One-way Mode 且 `BTCUSDT` 为 isolated margin；否则启动即 fail closed。它使用独立 checkpoint `.runtime/binance-testnet-state.json`，结束时会拉取权威 position/open-orders snapshot 并打印只读 reconciliation report。REST `newOrder` 的自动 retry 被关闭；REST command completion 不会被当成 ACK，只有 user-data stream 的 `NEW` 才推进本地订单状态。当前仍保持 fail-closed：如果出现 submit timeout、Fill-before-ACK、断线 gap 或本地/交易所不一致，应停机并对账，而不是自动重发订单。
+
 实验过程、故障日志与字段卡见 [`docs/learning-report.md`](docs/learning-report.md)。
 
 ## 代码入口
@@ -80,6 +108,7 @@ npm test
 - `src/strategy.ts`: 简单双均线信号
 - `src/risk.ts`: 最小风控
 - `src/exchange.ts`: 最小 execution command/event boundary 与模拟 adapter
+- `src/binance-testnet.ts`: Binance USDⓈ-M Testnet 行情、execution adapter 与事件映射
 - `src/order-tracker.ts`: In-flight order、累计成交、剩余数量与状态
 - `src/margin.ts`: 逐仓权益、保证金门槛与强平条件
 - `src/state-store.ts`: 版本化 checkpoint 与原子 JSON 文件存储

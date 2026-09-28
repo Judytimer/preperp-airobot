@@ -3,12 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "start": "node --experimental-strip-types src/index.ts",
     "demo": "node --experimental-strip-types src/interview-demo.ts",
+    "testnet:market": "node --experimental-strip-types src/testnet-market-smoke.ts",
+    "testnet": "node --experimental-strip-types src/testnet-index.ts",
     "acquire:formal-case-1": "bash scripts/acquire-formal-case-1.sh",
     "overlay": "node --experimental-strip-types src/overlay-index.ts",
     "replay": "node --experimental-strip-types src/replay-index.ts",
     "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@binance/derivatives-trading-usds-futures": "^38.1.1"
   }
 }

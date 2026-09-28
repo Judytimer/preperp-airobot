@@ -1,4 +1,7 @@
 *.zip
+node_modules/
 outputs/
 work/
 .runtime/
+.env
+.firecrawl/
