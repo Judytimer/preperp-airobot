@@ -129,9 +129,9 @@ Stage 2 主策略是一条纯模拟 Overlay 链：Meme 现货明显上涨后，�
 npm run overlay
 ```
 
-这条链复用现有 `OrderRequest -> SimulatedExchange -> ACK -> Pending -> Fill`，并使用 Prediction 专用策略、风险与 long-only YES 仓位账本。`BUY_YES` Candidate 会经过最小的 `ResearchPlan -> Evidence -> StrategyReviewer -> ShadowResult` 链；Research Router 声明 News、X、Reddit 与 Prediction Market 来源及 T0 时间窗，但当前只有 deterministic/mock research，不连接真实 API。
+这条链复用现有 `OrderRequest -> SimulatedExchange -> ACK -> Pending -> Fill`，并使用 Prediction 专用策略、风险与 long-only YES 仓位账本。`BUY_YES` Candidate 启动 `ShadowRunner` 后会立刻继续原 Risk / Execution，不等待 Shadow；Runner 在独立的 fire-and-continue 路径中执行 `deterministic ResearchPlan -> async EvidenceSearch -> async LlmStrategyReviewer -> ShadowRecord`。Candidate 是 defensive clone/deep-freeze 的 T0 输入，Runner 不读取 Bot 当前价格、持仓或后续 snapshot。当前只有 fake provider ports，尚未选择或连接真实 Search / LLM provider。
 
-AI 当前严格处于 **SHADOW**：`PASS / WOULD_BLOCK / ABSTAIN` 只记录反事实判断，不能修改原始 Overlay signal、risk decision 或 execution，也不能直接下单。当前 SHADOW 安全边界只 review 入场 Candidate；deterministic 退出绕过 Reviewer 且不可被 AI 阻断。这是当前阶段的权限边界，不是永久策略规则，也不代表未来已经决定如何 review 退出。
+AI 当前严格处于 **SHADOW**：`PASS / WOULD_BLOCK / ABSTAIN` 只存在于 `COMPLETED` record，不能修改原始 Overlay signal、risk decision 或 execution，也不能直接下单。Provider failure 使用独立 status 与 allowlist error code，不伪装成 `ABSTAIN`；证据正常返回但不足则是 `COMPLETED + ABSTAIN + INSUFFICIENT_SOURCE`。Runner 默认最多两个 in-flight task，容量满时立即记录 `SKIPPED_CAPACITY`，不排队；`drain(timeoutMs)` 只供测试和进程优雅退出，超时任务记录 `INCOMPLETE`，严禁由 `onSnapshot`、Risk 或 Execution 调用。当前 SHADOW 安全边界只 review 入场 Candidate；deterministic 退出绕过 Reviewer且不可被 AI 阻断。这是当前阶段的权限边界，不是永久策略规则。
 
 实现说明和未经验证的假设见 [`docs/overlay-learning-report.md`](docs/overlay-learning-report.md)。
 
