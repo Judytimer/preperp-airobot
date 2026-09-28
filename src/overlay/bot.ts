@@ -10,25 +10,15 @@ import {
   formatOverlaySignal,
   formatPending,
   formatResearch,
-  formatResearchPlan,
-  formatShadowResult,
   formatTradeCandidate
 } from "./logging.ts";
 import { PredictionPositionBook } from "./position.ts";
-import {
-  DeterministicResearchRouter,
-  DeterministicStrategyReviewer,
-  MockResearchContext
-} from "./research.ts";
 import { OverlayRiskManager } from "./risk.ts";
 import { MemePredictionOverlayStrategy } from "./strategy.ts";
 import type {
   PredictionPosition,
-  ResearchContext,
-  ResearchRouter,
   ResearchSnapshot,
-  ShadowResult,
-  StrategyReviewer,
+  ShadowRunner,
   TradeCandidate
 } from "./types.ts";
 
@@ -38,11 +28,7 @@ export type MemePredictionOverlayBotConfig = {
   maxRiskBudget: number;
   fillDelayMs: FillDelay;
   logger?: Logger;
-  shadow?: {
-    router: ResearchRouter;
-    context: ResearchContext;
-    reviewer: StrategyReviewer;
-  };
+  shadowRunner?: ShadowRunner;
 };
 
 export class MemePredictionOverlayBot {
@@ -50,10 +36,7 @@ export class MemePredictionOverlayBot {
   private readonly risk: OverlayRiskManager;
   private readonly exchange: SimulatedExchange;
   private readonly logger: Logger;
-  private readonly router: ResearchRouter;
-  private readonly researchContext: ResearchContext;
-  private readonly reviewer: StrategyReviewer;
-  private readonly shadowResults: Array<{ candidate: TradeCandidate; result: ShadowResult }> = [];
+  private readonly shadowRunner: ShadowRunner | undefined;
   private readonly pendingOrders = new Map<string, OrderRequest>();
   private nextClientOrderId = 1;
   private positionBook: PredictionPositionBook | null = null;
@@ -63,24 +46,7 @@ export class MemePredictionOverlayBot {
     this.risk = new OverlayRiskManager({ maxRiskBudget: config.maxRiskBudget });
     this.exchange = new SimulatedExchange(config.fillDelayMs);
     this.logger = config.logger ?? console.log;
-    this.router = config.shadow?.router ?? new DeterministicResearchRouter();
-    this.researchContext = config.shadow?.context ?? new MockResearchContext([]);
-    this.reviewer =
-      config.shadow?.reviewer ??
-      new DeterministicStrategyReviewer({
-        verdict: "ABSTAIN",
-        confidence: 0,
-        moveValidity: "INSUFFICIENT_SOURCE",
-        moveDecomposition: ["UNKNOWN"],
-        sourceAgreement: "INSUFFICIENT",
-        evidenceSourceIds: [],
-        reason: "no shadow reviewer configured",
-        catalystSupport: "UNKNOWN",
-        entryQuality: "UNKNOWN",
-        mispricingConfidence: "UNKNOWN",
-        resolutionRisk: "UNKNOWN",
-        dataQuality: "UNKNOWN"
-      });
+    this.shadowRunner = config.shadowRunner;
     this.exchange.onExecutionEvent((event) => this.onExecutionEvent(event));
   }
 
@@ -106,17 +72,11 @@ export class MemePredictionOverlayBot {
         signal
       };
       this.logger(formatTradeCandidate(candidate));
-      let result: ShadowResult;
       try {
-        const plan = this.router.route(candidate);
-        const evidence = this.researchContext.research(plan);
-        this.logger(formatResearchPlan(plan, evidence.length));
-        result = this.reviewer.review(candidate, plan, evidence);
-      } catch (error) {
-        result = shadowErrorResult(error);
+        this.shadowRunner?.start(candidate);
+      } catch {
+        // Even a broken ShadowRunner implementation cannot block Risk or Execution.
       }
-      this.shadowResults.push({ candidate, result });
-      this.logger(formatShadowResult(candidate.candidateId, result));
       // Current SHADOW safety boundary: AI reviews entries only and has no execution
       // authority. Deterministic exits bypass review; this is not a permanent strategy rule.
     }
@@ -143,10 +103,6 @@ export class MemePredictionOverlayBot {
     return this.positionBook.get();
   }
 
-  getShadowResults(): readonly { candidate: TradeCandidate; result: ShadowResult }[] {
-    return structuredClone(this.shadowResults);
-  }
-
   private getProjectedShares(): number {
     let shares = this.positionBook!.get().shares;
     for (const order of this.pendingOrders.values()) {
@@ -166,22 +122,4 @@ export class MemePredictionOverlayBot {
     const position = this.positionBook!.applyFill(event.fill);
     this.logger(formatOverlayPosition(position));
   }
-}
-
-function shadowErrorResult(error: unknown): ShadowResult {
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    verdict: "ABSTAIN",
-    confidence: 0,
-    moveValidity: "INSUFFICIENT_SOURCE",
-    moveDecomposition: ["UNKNOWN"],
-    sourceAgreement: "INSUFFICIENT",
-    evidenceSourceIds: [],
-    reason: `shadow error: ${message}`,
-    catalystSupport: "UNKNOWN",
-    entryQuality: "UNKNOWN",
-    mispricingConfidence: "UNKNOWN",
-    resolutionRisk: "UNKNOWN",
-    dataQuality: "UNKNOWN"
-  };
 }

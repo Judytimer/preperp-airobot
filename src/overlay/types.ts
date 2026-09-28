@@ -10,47 +10,50 @@ import type {
 export type { MoveDriver, MoveValidity, ShadowVerdict };
 
 export type ResearchSnapshot = {
-  seq: number;
-  ts: number;
-  meme: {
-    symbol: string;
-    spotPrice: number;
-    fdv: number;
+  readonly seq: number;
+  readonly ts: number;
+  readonly meme: {
+    readonly symbol: string;
+    readonly spotPrice: number;
+    readonly fdv: number;
   };
-  prediction: {
-    marketId: string;
-    question: string;
-    targetFdv: number;
-    yesPrice: number;
+  readonly prediction: {
+    readonly marketId: string;
+    readonly question: string;
+    readonly targetFdv: number;
+    readonly yesPrice: number;
   };
 };
 
 export interface ResearchContext {
   next(): ResearchSnapshot | null;
-  research(plan: ResearchPlan): readonly Evidence[];
 }
 
 export type TradeCandidate = {
-  candidateId: string;
-  t0: number;
-  snapshot: ResearchSnapshot;
-  signal: OverlaySignal & { action: "BUY_YES" };
+  readonly candidateId: string;
+  readonly t0: number;
+  readonly snapshot: ResearchSnapshot;
+  readonly signal: Readonly<OverlaySignal & { action: "BUY_YES" }>;
 };
 
 export type ResearchSource = "NEWS" | "X" | "REDDIT" | "PREDICTION_MARKET";
 
 export type ResearchPlan = {
-  candidateId: string;
-  sources: readonly ResearchSource[];
-  windowStart: number;
-  windowEnd: number;
-  validEvidence: string;
+  readonly candidateId: string;
+  readonly sources: readonly ResearchSource[];
+  readonly windowStart: number;
+  readonly windowEnd: number;
+  readonly validEvidence: string;
 };
 
 export type Evidence = ReplayEvidence;
 
 export interface ResearchRouter {
   route(candidate: TradeCandidate): ResearchPlan;
+}
+
+export interface EvidenceSearch {
+  search(candidate: TradeCandidate, plan: ResearchPlan): Promise<readonly Evidence[]>;
 }
 
 export type ReviewAssessment = "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
@@ -63,12 +66,50 @@ export type ShadowResult = ShadowReviewRecord & {
   dataQuality: ReviewAssessment;
 };
 
-export interface StrategyReviewer {
+export interface LlmStrategyReviewer {
   review(
     candidate: TradeCandidate,
     plan: ResearchPlan,
     evidence: readonly Evidence[]
-  ): ShadowResult;
+  ): Promise<ShadowResult>;
+}
+
+export type ShadowErrorCode =
+  | "SEARCH_UNAVAILABLE"
+  | "SEARCH_FAILED"
+  | "REVIEWER_UNAVAILABLE"
+  | "REVIEWER_FAILED"
+  | "INVALID_PROVIDER_RESPONSE"
+  | "INTERNAL_SHADOW_ERROR";
+
+export type ShadowRecord =
+  | {
+      readonly candidateId: string;
+      readonly status: "COMPLETED";
+      readonly completedAt: number;
+      readonly shadowVerdict: ShadowVerdict;
+      readonly result: ShadowResult;
+    }
+  | {
+      readonly candidateId: string;
+      readonly status: "PROVIDER_UNAVAILABLE" | "PROVIDER_FAILED";
+      readonly completedAt: number;
+      readonly errorCode: ShadowErrorCode;
+    }
+  | {
+      readonly candidateId: string;
+      readonly status: "INCOMPLETE" | "SKIPPED_CAPACITY";
+      readonly completedAt: number;
+    };
+
+export type ShadowStartResult =
+  | { readonly accepted: true }
+  | { readonly accepted: false; readonly status: "SKIPPED_CAPACITY" };
+
+export interface ShadowRunner {
+  start(candidate: TradeCandidate): ShadowStartResult;
+  /** Lifecycle control for tests and graceful shutdown only; never call from execution. */
+  drain(timeoutMs: number): Promise<void>;
 }
 
 export type OverlayAction = "HOLD" | "BUY_YES" | "SELL_YES";

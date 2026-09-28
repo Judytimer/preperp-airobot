@@ -4,14 +4,16 @@ import test from "node:test";
 import { MemePredictionOverlayBot } from "../src/overlay/bot.ts";
 import {
   DeterministicResearchRouter,
-  DeterministicStrategyReviewer,
-  MockResearchContext
+  DeterministicStrategyReviewer
 } from "../src/overlay/research.ts";
+import { BoundedShadowRunner } from "../src/overlay/shadow-runner.ts";
 import type {
+  Evidence,
+  EvidenceSearch,
   ResearchSnapshot,
+  ShadowRecord,
   ShadowResult,
-  ShadowVerdict,
-  StrategyReviewer
+  TradeCandidate
 } from "../src/overlay/types.ts";
 
 test("runs meme research -> YES signal -> risk -> ACK -> pending -> fill -> exit", async () => {
@@ -45,105 +47,123 @@ test("runs meme research -> YES signal -> risk -> ACK -> pending -> fill -> exit
   assert.equal(bot.getPosition().shares, 0);
   assert.equal(bot.getPosition().premiumAtRisk, 0);
   assert.ok(bot.getPosition().realizedPnl > 0);
-  assert.equal(bot.getShadowResults().length, 1, "deterministic exit must not create a review");
 });
 
-for (const verdict of ["PASS", "WOULD_BLOCK", "ABSTAIN"] satisfies ShadowVerdict[]) {
-  test(`${verdict} shadow review is recorded without changing the BUY_YES order`, async () => {
-    const logs: string[] = [];
-    const research = new MockResearchContext([], [
-      { sourceId: "MARKET-1", publishedAt: 2, summary: "deterministic market evidence" }
-    ]);
-    const bot = new MemePredictionOverlayBot({
-      spotRiseTriggerPct: 0.5,
-      exitYesPrice: 0.7,
-      maxRiskBudget: 100,
-      fillDelayMs: 0,
-      logger: (line) => logs.push(line),
-      shadow: {
-        router: new DeterministicResearchRouter(),
-        context: research,
-        reviewer: new DeterministicStrategyReviewer(review(verdict))
-      }
-    });
+test("slow Shadow provider does not delay Risk, ACK, or Fill", async () => {
+  const logs: string[] = [];
+  const records: ShadowRecord[] = [];
+  const pendingSearch = deferred<readonly Evidence[]>();
+  const runner = shadowRunner(records, { search: () => pendingSearch.promise });
+  const bot = overlayBot(logs, runner);
 
-    await bot.onSnapshot(snapshot(1, 100, 1_000, 2_000, 0.3));
-    await bot.onSnapshot(snapshot(2, 160, 1_600, 2_000, 0.35));
-    await bot.waitForIdle();
+  await enter(bot);
+  await bot.waitForIdle();
 
-    const reviews = bot.getShadowResults();
-    assert.equal(reviews.length, 1);
-    assert.equal(reviews[0]?.candidate.signal.action, "BUY_YES");
-    assert.equal(reviews[0]?.result.verdict, verdict);
-    assert.equal(bot.getPosition().shares, 285.714285);
-    assert.ok(bot.getPosition().premiumAtRisk <= 100);
-    assert.equal(logs.filter((line) => line.startsWith("[OVERLAY_ACK]")).length, 1);
-    assert.match(logs.join("\n"), new RegExp(`\\[SHADOW_REVIEW\\].*verdict=${verdict}`));
-    assert.match(logs.join("\n"), /\[OVERLAY_RISK\] approved side=BUY/);
-  });
-}
+  assert.equal(records.length, 0);
+  assert.equal(bot.getPosition().shares, 285.714285);
+  assert.equal(countLogs(logs, "[OVERLAY_RISK] approved"), 1);
+  assert.equal(countLogs(logs, "[OVERLAY_ACK]"), 1);
+  assert.equal(countLogs(logs, "[OVERLAY_FILL]"), 1);
 
-test("reviewer failure records ABSTAIN without changing BUY quantity, ACK, or Fill", async () => {
-  const healthyLogs: string[] = [];
-  const failureLogs: string[] = [];
-  const healthy = shadowBot(healthyLogs, new DeterministicStrategyReviewer(review("PASS")));
-  const failing = shadowBot(failureLogs, {
-    review() {
-      throw new Error("reviewer unavailable");
-    }
-  });
-
-  for (const bot of [healthy, failing]) {
-    await bot.onSnapshot(snapshot(1, 100, 1_000, 2_000, 0.3));
-    await bot.onSnapshot(snapshot(2, 160, 1_600, 2_000, 0.35));
-    await bot.waitForIdle();
-  }
-
-  assert.deepEqual(failing.getPosition(), healthy.getPosition());
-  assert.equal(failing.getPosition().shares, 285.714285);
-  assert.equal(countLogs(failureLogs, "[OVERLAY_ACK]"), countLogs(healthyLogs, "[OVERLAY_ACK]"));
-  assert.equal(countLogs(failureLogs, "[OVERLAY_FILL]"), countLogs(healthyLogs, "[OVERLAY_FILL]"));
-  assert.equal(countLogs(failureLogs, "[OVERLAY_ACK]"), 1);
-  assert.equal(countLogs(failureLogs, "[OVERLAY_FILL]"), 1);
-  assert.equal(failing.getShadowResults()[0]?.result.verdict, "ABSTAIN");
-  assert.match(failing.getShadowResults()[0]?.result.reason ?? "", /shadow error: reviewer unavailable/);
-  assert.match(failureLogs.join("\n"), /\[OVERLAY_RISK\] approved side=BUY/);
+  pendingSearch.resolve([]);
+  await runner.drain(100);
+  assert.equal(records[0]?.status, "COMPLETED");
 });
 
-function shadowBot(logs: string[], reviewer: StrategyReviewer) {
+test("full Shadow capacity skips without changing BUY, ACK, or Fill", async () => {
+  const shadowLogs: string[] = [];
+  const controlLogs: string[] = [];
+  const records: ShadowRecord[] = [];
+  const pendingSearch = deferred<readonly Evidence[]>();
+  const runner = shadowRunner(records, { search: () => pendingSearch.promise });
+  runner.start(candidate("CAPACITY-1", 1));
+  runner.start(candidate("CAPACITY-2", 2));
+
+  const withFullShadow = overlayBot(shadowLogs, runner);
+  const withoutShadow = overlayBot(controlLogs);
+  await enter(withFullShadow);
+  await enter(withoutShadow);
+  await Promise.all([withFullShadow.waitForIdle(), withoutShadow.waitForIdle()]);
+  await Promise.resolve();
+
+  assert.deepEqual(withFullShadow.getPosition(), withoutShadow.getPosition());
+  assert.equal(countLogs(shadowLogs, "[OVERLAY_ACK]"), countLogs(controlLogs, "[OVERLAY_ACK]"));
+  assert.equal(countLogs(shadowLogs, "[OVERLAY_FILL]"), countLogs(controlLogs, "[OVERLAY_FILL]"));
+  assert.equal(records.find((record) => record.status === "SKIPPED_CAPACITY")?.candidateId, "DOGE-FDV-2B:2");
+
+  pendingSearch.resolve([]);
+  await runner.drain(100);
+});
+
+function overlayBot(logs: string[], shadowRunner?: BoundedShadowRunner) {
   return new MemePredictionOverlayBot({
     spotRiseTriggerPct: 0.5,
     exitYesPrice: 0.7,
     maxRiskBudget: 100,
     fillDelayMs: 0,
     logger: (line) => logs.push(line),
-    shadow: {
-      router: new DeterministicResearchRouter(),
-      context: new MockResearchContext([]),
-      reviewer
-    }
+    shadowRunner
   });
+}
+
+function shadowRunner(records: ShadowRecord[], search: EvidenceSearch): BoundedShadowRunner {
+  return new BoundedShadowRunner({
+    router: new DeterministicResearchRouter(),
+    search,
+    reviewer: new DeterministicStrategyReviewer(review()),
+    record: (record) => records.push(record),
+    maxInFlight: 2
+  });
+}
+
+async function enter(bot: MemePredictionOverlayBot): Promise<void> {
+  await bot.onSnapshot(snapshot(1, 100, 1_000, 2_000, 0.3));
+  await bot.onSnapshot(snapshot(2, 160, 1_600, 2_000, 0.35));
 }
 
 function countLogs(logs: readonly string[], prefix: string): number {
   return logs.filter((line) => line.startsWith(prefix)).length;
 }
 
-function review(verdict: ShadowVerdict): ShadowResult {
+function review(): ShadowResult {
   return {
-    verdict,
+    verdict: "ABSTAIN",
     confidence: 0.7,
     moveValidity: "SUPPORTED",
     moveDecomposition: ["MOMENTUM"],
     sourceAgreement: "AGREE",
-    evidenceSourceIds: ["MARKET-1"],
-    reason: `deterministic ${verdict} fixture`,
+    evidenceSourceIds: [],
+    reason: "deterministic fixture",
     catalystSupport: "HIGH",
     entryQuality: "MEDIUM",
     mispricingConfidence: "MEDIUM",
     resolutionRisk: "LOW",
     dataQuality: "HIGH"
   };
+}
+
+function candidate(candidateId: string, t0: number): TradeCandidate {
+  const candidateSnapshot = snapshot(t0, 160, 1_600, 2_000, 0.35);
+  return {
+    candidateId,
+    t0,
+    snapshot: candidateSnapshot,
+    signal: {
+      action: "BUY_YES",
+      marketId: candidateSnapshot.prediction.marketId,
+      yesPrice: candidateSnapshot.prediction.yesPrice,
+      ts: t0,
+      reason: "test candidate"
+    }
+  };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
 }
 
 function snapshot(

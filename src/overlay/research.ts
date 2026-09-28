@@ -1,22 +1,21 @@
 import type {
   Evidence,
+  EvidenceSearch,
+  LlmStrategyReviewer,
   ResearchContext,
   ResearchPlan,
   ResearchRouter,
   ResearchSnapshot,
   ShadowResult,
-  StrategyReviewer,
   TradeCandidate
 } from "./types.ts";
 
 export class MockResearchContext implements ResearchContext {
   private index = 0;
   private readonly snapshots: readonly ResearchSnapshot[];
-  private readonly evidence: readonly Evidence[];
 
-  constructor(snapshots: readonly ResearchSnapshot[], evidence: readonly Evidence[] = []) {
+  constructor(snapshots: readonly ResearchSnapshot[]) {
     this.snapshots = snapshots;
-    this.evidence = evidence;
   }
 
   next(): ResearchSnapshot | null {
@@ -27,12 +26,6 @@ export class MockResearchContext implements ResearchContext {
 
     this.index += 1;
     return snapshot;
-  }
-
-  research(plan: ResearchPlan): readonly Evidence[] {
-    return this.evidence.filter(
-      (item) => item.publishedAt >= plan.windowStart && item.publishedAt <= plan.windowEnd
-    );
   }
 }
 
@@ -54,18 +47,32 @@ export class DeterministicResearchRouter implements ResearchRouter {
   }
 }
 
-export class DeterministicStrategyReviewer implements StrategyReviewer {
+export class MockEvidenceSearch implements EvidenceSearch {
+  private readonly evidence: readonly Evidence[];
+
+  constructor(evidence: readonly Evidence[] = []) {
+    this.evidence = evidence;
+  }
+
+  async search(_candidate: TradeCandidate, plan: ResearchPlan): Promise<readonly Evidence[]> {
+    return this.evidence.filter(
+      (item) => item.publishedAt >= plan.windowStart && item.publishedAt <= plan.windowEnd
+    );
+  }
+}
+
+export class DeterministicStrategyReviewer implements LlmStrategyReviewer {
   private readonly result: ShadowResult;
 
   constructor(result: ShadowResult) {
     this.result = result;
   }
 
-  review(
+  async review(
     _candidate: TradeCandidate,
     _plan: ResearchPlan,
     _evidence: readonly Evidence[]
-  ): ShadowResult {
+  ): Promise<ShadowResult> {
     return structuredClone(this.result);
   }
 }

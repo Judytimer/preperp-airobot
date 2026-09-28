@@ -3,9 +3,8 @@ import type {
   OverlayRiskDecision,
   OverlaySignal,
   PredictionPosition,
-  ResearchPlan,
   ResearchSnapshot,
-  ShadowResult,
+  ShadowRecord,
   TradeCandidate
 } from "./types.ts";
 
@@ -21,12 +20,14 @@ export function formatTradeCandidate(candidate: TradeCandidate): string {
   return `[TRADE_CANDIDATE] id=${candidate.candidateId} t0=${candidate.t0} market=${candidate.signal.marketId} action=${candidate.signal.action}`;
 }
 
-export function formatResearchPlan(plan: ResearchPlan, evidenceCount: number): string {
-  return `[RESEARCH_PLAN] candidateId=${plan.candidateId} sources=${plan.sources.join(",")} window=${plan.windowStart}:${plan.windowEnd} evidence=${evidenceCount}`;
-}
-
-export function formatShadowResult(candidateId: string, result: ShadowResult): string {
-  return `[SHADOW_REVIEW] mode=SHADOW executionAuthority=false candidateId=${candidateId} verdict=${result.verdict} moveValidity=${result.moveValidity} sourceAgreement=${result.sourceAgreement} catalystSupport=${result.catalystSupport} entryQuality=${result.entryQuality} mispricingConfidence=${result.mispricingConfidence} resolutionRisk=${result.resolutionRisk} dataQuality=${result.dataQuality} evidenceSourceIds=${result.evidenceSourceIds.join(",")} reason="${result.reason}"`;
+export function formatShadowRecord(record: ShadowRecord): string {
+  if (record.status === "COMPLETED") {
+    return `[SHADOW_RECORD] mode=SHADOW executionAuthority=false candidateId=${record.candidateId} status=${record.status} verdict=${record.shadowVerdict} moveValidity=${record.result.moveValidity} sourceAgreement=${record.result.sourceAgreement} evidenceSourceIds=${record.result.evidenceSourceIds.join(",")}`;
+  }
+  if (record.status === "PROVIDER_UNAVAILABLE" || record.status === "PROVIDER_FAILED") {
+    return `[SHADOW_RECORD] mode=SHADOW executionAuthority=false candidateId=${record.candidateId} status=${record.status} errorCode=${record.errorCode}`;
+  }
+  return `[SHADOW_RECORD] mode=SHADOW executionAuthority=false candidateId=${record.candidateId} status=${record.status}`;
 }
 
 export function formatOverlayRisk(decision: OverlayRiskDecision): string {
