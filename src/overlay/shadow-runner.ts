@@ -27,6 +27,7 @@ type ActiveTask = {
 };
 
 export class ShadowProviderUnavailableError extends Error {}
+export class InvalidProviderResponseError extends Error {}
 
 export class BoundedShadowRunner implements ShadowRunner {
   private readonly router: ResearchRouter;
@@ -127,11 +128,13 @@ export class BoundedShadowRunner implements ShadowRunner {
       this.finish(taskId, completedRecord(candidate.candidateId, result));
     } catch (error) {
       const unavailable = stage !== "ROUTER" && error instanceof ShadowProviderUnavailableError;
+      const invalidResponse =
+        stage === "REVIEWER" && error instanceof InvalidProviderResponseError;
       this.finish(taskId, {
         candidateId: candidate.candidateId,
         status: unavailable ? "PROVIDER_UNAVAILABLE" : "PROVIDER_FAILED",
         completedAt: Date.now(),
-        errorCode: errorCode(stage, unavailable)
+        errorCode: invalidResponse ? "INVALID_PROVIDER_RESPONSE" : errorCode(stage, unavailable)
       });
     }
   }
