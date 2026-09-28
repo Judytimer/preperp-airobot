@@ -10,7 +10,8 @@ import {
 import type {
   ResearchSnapshot,
   ShadowResult,
-  ShadowVerdict
+  ShadowVerdict,
+  StrategyReviewer
 } from "../src/overlay/types.ts";
 
 test("runs meme research -> YES signal -> risk -> ACK -> pending -> fill -> exit", async () => {
@@ -80,6 +81,52 @@ for (const verdict of ["PASS", "WOULD_BLOCK", "ABSTAIN"] satisfies ShadowVerdict
     assert.match(logs.join("\n"), new RegExp(`\\[SHADOW_REVIEW\\].*verdict=${verdict}`));
     assert.match(logs.join("\n"), /\[OVERLAY_RISK\] approved side=BUY/);
   });
+}
+
+test("reviewer failure records ABSTAIN without changing BUY quantity, ACK, or Fill", async () => {
+  const healthyLogs: string[] = [];
+  const failureLogs: string[] = [];
+  const healthy = shadowBot(healthyLogs, new DeterministicStrategyReviewer(review("PASS")));
+  const failing = shadowBot(failureLogs, {
+    review() {
+      throw new Error("reviewer unavailable");
+    }
+  });
+
+  for (const bot of [healthy, failing]) {
+    await bot.onSnapshot(snapshot(1, 100, 1_000, 2_000, 0.3));
+    await bot.onSnapshot(snapshot(2, 160, 1_600, 2_000, 0.35));
+    await bot.waitForIdle();
+  }
+
+  assert.deepEqual(failing.getPosition(), healthy.getPosition());
+  assert.equal(failing.getPosition().shares, 285.714285);
+  assert.equal(countLogs(failureLogs, "[OVERLAY_ACK]"), countLogs(healthyLogs, "[OVERLAY_ACK]"));
+  assert.equal(countLogs(failureLogs, "[OVERLAY_FILL]"), countLogs(healthyLogs, "[OVERLAY_FILL]"));
+  assert.equal(countLogs(failureLogs, "[OVERLAY_ACK]"), 1);
+  assert.equal(countLogs(failureLogs, "[OVERLAY_FILL]"), 1);
+  assert.equal(failing.getShadowResults()[0]?.result.verdict, "ABSTAIN");
+  assert.match(failing.getShadowResults()[0]?.result.reason ?? "", /shadow error: reviewer unavailable/);
+  assert.match(failureLogs.join("\n"), /\[OVERLAY_RISK\] approved side=BUY/);
+});
+
+function shadowBot(logs: string[], reviewer: StrategyReviewer) {
+  return new MemePredictionOverlayBot({
+    spotRiseTriggerPct: 0.5,
+    exitYesPrice: 0.7,
+    maxRiskBudget: 100,
+    fillDelayMs: 0,
+    logger: (line) => logs.push(line),
+    shadow: {
+      router: new DeterministicResearchRouter(),
+      context: new MockResearchContext([]),
+      reviewer
+    }
+  });
+}
+
+function countLogs(logs: readonly string[], prefix: string): number {
+  return logs.filter((line) => line.startsWith(prefix)).length;
 }
 
 function review(verdict: ShadowVerdict): ShadowResult {

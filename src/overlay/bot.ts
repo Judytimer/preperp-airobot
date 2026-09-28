@@ -106,10 +106,15 @@ export class MemePredictionOverlayBot {
         signal
       };
       this.logger(formatTradeCandidate(candidate));
-      const plan = this.router.route(candidate);
-      const evidence = this.researchContext.research(plan);
-      this.logger(formatResearchPlan(plan, evidence.length));
-      const result = this.reviewer.review(candidate, plan, evidence);
+      let result: ShadowResult;
+      try {
+        const plan = this.router.route(candidate);
+        const evidence = this.researchContext.research(plan);
+        this.logger(formatResearchPlan(plan, evidence.length));
+        result = this.reviewer.review(candidate, plan, evidence);
+      } catch (error) {
+        result = shadowErrorResult(error);
+      }
       this.shadowResults.push({ candidate, result });
       this.logger(formatShadowResult(candidate.candidateId, result));
       // Current SHADOW safety boundary: AI reviews entries only and has no execution
@@ -161,4 +166,22 @@ export class MemePredictionOverlayBot {
     const position = this.positionBook!.applyFill(event.fill);
     this.logger(formatOverlayPosition(position));
   }
+}
+
+function shadowErrorResult(error: unknown): ShadowResult {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    verdict: "ABSTAIN",
+    confidence: 0,
+    moveValidity: "INSUFFICIENT_SOURCE",
+    moveDecomposition: ["UNKNOWN"],
+    sourceAgreement: "INSUFFICIENT",
+    evidenceSourceIds: [],
+    reason: `shadow error: ${message}`,
+    catalystSupport: "UNKNOWN",
+    entryQuality: "UNKNOWN",
+    mispricingConfidence: "UNKNOWN",
+    resolutionRisk: "UNKNOWN",
+    dataQuality: "UNKNOWN"
+  };
 }
