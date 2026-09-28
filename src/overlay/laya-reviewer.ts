@@ -1,4 +1,7 @@
-import { ShadowProviderUnavailableError } from "./shadow-runner.ts";
+import {
+  InvalidProviderResponseError,
+  ShadowProviderUnavailableError
+} from "./shadow-runner.ts";
 import type {
   Evidence,
   LlmStrategyReviewer,
@@ -19,15 +22,15 @@ export type LayaReviewerConfig = {
 };
 
 type ChoiceQuestion = {
-  id: string;
   type: "choice";
-  question: string;
-  choices: readonly string[];
+  instructions: string;
+  criteria: Readonly<Record<string, string>>;
 };
 
 type ChoiceAnswer = {
-  id: string;
+  type: "choice";
   choice: string;
+  probabilities: Readonly<Record<string, number>>;
   confidence: number;
 };
 
@@ -49,17 +52,17 @@ const MOVE_DRIVERS = [
 const SOURCE_AGREEMENTS = ["AGREE", "CONFLICT", "INSUFFICIENT"] as const;
 const ASSESSMENTS = ["HIGH", "MEDIUM", "LOW", "UNKNOWN"] as const;
 
-const QUESTIONS: readonly ChoiceQuestion[] = [
-  choice("verdict", "Should the fixed Overlay entry candidate pass shadow review?", VERDICTS),
-  choice("moveValidity", "How valid is the observed move?", MOVE_VALIDITIES),
-  choice("primaryDriver", "What is the primary driver of the move?", MOVE_DRIVERS),
-  choice("sourceAgreement", "How well do the supplied evidence sources agree?", SOURCE_AGREEMENTS),
-  choice("catalystSupport", "How strongly does the evidence support a catalyst?", ASSESSMENTS),
-  choice("entryQuality", "What is the quality of the proposed entry?", ASSESSMENTS),
-  choice("mispricingConfidence", "How strong is the evidence of mispricing?", ASSESSMENTS),
-  choice("resolutionRisk", "How high is prediction-market resolution risk?", ASSESSMENTS),
-  choice("dataQuality", "What is the quality of the supplied data?", ASSESSMENTS)
-];
+const QUESTIONS: Readonly<Record<string, ChoiceQuestion>> = {
+  verdict: choice("Should the fixed Overlay entry candidate pass shadow review?", VERDICTS),
+  moveValidity: choice("How valid is the observed move?", MOVE_VALIDITIES),
+  primaryDriver: choice("What is the primary driver of the move?", MOVE_DRIVERS),
+  sourceAgreement: choice("How well do the supplied evidence sources agree?", SOURCE_AGREEMENTS),
+  catalystSupport: choice("How strongly does the evidence support a catalyst?", ASSESSMENTS),
+  entryQuality: choice("What is the quality of the proposed entry?", ASSESSMENTS),
+  mispricingConfidence: choice("How strong is the evidence of mispricing?", ASSESSMENTS),
+  resolutionRisk: choice("How high is prediction-market resolution risk?", ASSESSMENTS),
+  dataQuality: choice("What is the quality of the supplied data?", ASSESSMENTS)
+};
 
 export class LayaReviewerAdapter implements LlmStrategyReviewer {
   private readonly endpoint: string;
@@ -96,7 +99,7 @@ export class LayaReviewerAdapter implements LlmStrategyReviewer {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
-          context: { candidate, researchPlan: plan, evidence },
+          state: { candidate, researchPlan: plan, evidence },
           questions: QUESTIONS
         }),
         signal: controller.signal
@@ -110,17 +113,17 @@ export class LayaReviewerAdapter implements LlmStrategyReviewer {
       if (response.status === 503) {
         throw new ShadowProviderUnavailableError("Laya reviewer unavailable");
       }
+      if (response.status === 422) throw new InvalidProviderResponseError();
       if (!response.ok) throw new Error("Laya reviewer request failed");
 
       const payload = await readBoundedJson(response, this.maxResponseBytes);
-      const result = toShadowResult(payload, evidence);
-      return result ?? invalidShadowResult();
+      return toShadowResult(payload, evidence);
     } catch (error) {
       if (error instanceof ShadowProviderUnavailableError) throw error;
       if (controller.signal.aborted) {
         throw new ShadowProviderUnavailableError("Laya reviewer unavailable");
       }
-      if (error instanceof InvalidLayaResponseError) return invalidShadowResult();
+      if (error instanceof InvalidProviderResponseError) throw error;
       throw error;
     } finally {
       clearTimeout(timeout);
@@ -135,23 +138,28 @@ export class LayaReviewerAdapter implements LlmStrategyReviewer {
 }
 
 function choice(
-  id: string,
-  question: string,
+  instructions: string,
   choices: readonly string[]
 ): ChoiceQuestion {
-  return { id, type: "choice", question, choices };
+  return {
+    type: "choice",
+    instructions,
+    criteria: Object.fromEntries(
+      choices.map((value) => [value, `Select ${value} when it best matches the supplied state.`])
+    )
+  };
 }
 
 async function readBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    throw new InvalidLayaResponseError();
+    throw new InvalidProviderResponseError();
   }
 
   const reader = response.body?.getReader();
   if (reader === undefined) {
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maxBytes) throw new InvalidLayaResponseError();
+    if (bytes.byteLength > maxBytes) throw new InvalidProviderResponseError();
     return parseJson(bytes);
   }
 
@@ -163,7 +171,7 @@ async function readBoundedJson(response: Response, maxBytes: number): Promise<un
     total += value.byteLength;
     if (total > maxBytes) {
       await reader.cancel();
-      throw new InvalidLayaResponseError();
+      throw new InvalidProviderResponseError();
     }
     chunks.push(value);
   }
@@ -181,21 +189,24 @@ function parseJson(bytes: Uint8Array): unknown {
   try {
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
-    throw new InvalidLayaResponseError();
+    throw new InvalidProviderResponseError();
   }
 }
 
-function toShadowResult(payload: unknown, evidence: readonly Evidence[]): ShadowResult | null {
-  if (!isObject(payload) || !Array.isArray(payload.answers)) return null;
-  const answers = new Map<string, ChoiceAnswer>();
-  for (const value of payload.answers) {
-    const parsed = choiceAnswer(value);
-    if (parsed === null || answers.has(parsed.id)) return null;
-    answers.set(parsed.id, parsed);
+function toShadowResult(payload: unknown, evidence: readonly Evidence[]): ShadowResult {
+  if (
+    !isObject(payload) ||
+    typeof payload.model !== "string" ||
+    !isObject(payload.answers) ||
+    !isObject(payload.usage) ||
+    Object.keys(payload.answers).length !== Object.keys(QUESTIONS).length
+  ) {
+    throw new InvalidProviderResponseError();
   }
-  if (answers.size !== QUESTIONS.length) return null;
+  const answers = payload.answers;
 
-  const verdict = answer(answers, "verdict", VERDICTS);
+  const verdictAnswer = choiceAnswer(answers.verdict, VERDICTS);
+  const verdict = verdictAnswer?.choice ?? null;
   const moveValidity = answer(answers, "moveValidity", MOVE_VALIDITIES);
   const primaryDriver = answer(answers, "primaryDriver", MOVE_DRIVERS);
   const sourceAgreement = answer(answers, "sourceAgreement", SOURCE_AGREEMENTS);
@@ -215,10 +226,10 @@ function toShadowResult(payload: unknown, evidence: readonly Evidence[]): Shadow
     resolutionRisk === null ||
     dataQuality === null
   ) {
-    return null;
+    throw new InvalidProviderResponseError();
   }
 
-  const confidence = answers.get("verdict")!.confidence;
+  const confidence = verdictAnswer!.confidence;
   return {
     verdict,
     confidence,
@@ -236,21 +247,24 @@ function toShadowResult(payload: unknown, evidence: readonly Evidence[]): Shadow
 }
 
 function answer<const T extends readonly string[]>(
-  answers: ReadonlyMap<string, ChoiceAnswer>,
+  answers: Readonly<Record<string, unknown>>,
   id: string,
   allowed: T
 ): T[number] | null {
-  const value = answers.get(id);
-  if (value === undefined || !allowed.includes(value.choice)) return null;
-  return value.choice;
+  const value = choiceAnswer(answers[id], allowed);
+  return value?.choice ?? null;
 }
 
-function choiceAnswer(value: unknown): ChoiceAnswer | null {
+function choiceAnswer(
+  value: unknown,
+  allowed: readonly string[]
+): ChoiceAnswer | null {
   if (!isObject(value)) return null;
-  const id = typeof value.id === "string" ? value.id : value.questionId;
   if (
-    typeof id !== "string" ||
+    value.type !== "choice" ||
     typeof value.choice !== "string" ||
+    !allowed.includes(value.choice) ||
+    !isObject(value.probabilities) ||
     typeof value.confidence !== "number" ||
     !Number.isFinite(value.confidence) ||
     value.confidence < 0 ||
@@ -258,15 +272,31 @@ function choiceAnswer(value: unknown): ChoiceAnswer | null {
   ) {
     return null;
   }
-  return { id, choice: value.choice, confidence: value.confidence };
+  if (
+    Object.keys(value.probabilities).length !== allowed.length ||
+    allowed.some((key) => !(key in value.probabilities))
+  ) {
+    return null;
+  }
+  for (const [key, probability] of Object.entries(value.probabilities)) {
+    if (
+      !allowed.includes(key) ||
+      typeof probability !== "number" ||
+      !Number.isFinite(probability) ||
+      probability < 0 ||
+      probability > 1
+    ) {
+      return null;
+    }
+  }
+  return {
+    type: "choice",
+    choice: value.choice,
+    probabilities: value.probabilities as Record<string, number>,
+    confidence: value.confidence
+  };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
-
-function invalidShadowResult(): ShadowResult {
-  return { verdict: "INVALID_PROVIDER_RESPONSE" } as unknown as ShadowResult;
-}
-
-class InvalidLayaResponseError extends Error {}

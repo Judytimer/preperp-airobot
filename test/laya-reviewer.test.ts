@@ -34,9 +34,15 @@ test("maps one multi-question choice response into ShadowResult", async () => {
   assert.equal(requestInit?.method, "POST");
   assert.equal((requestInit?.headers as Record<string, string>).authorization, "Bearer test-key");
   const body = JSON.parse(String(requestInit?.body));
-  assert.equal(body.questions.length, 9);
-  assert.deepEqual(body.questions.map((item: { type: string }) => item.type), Array(9).fill("choice"));
-  assert.equal(body.questions.some((item: object) => "score" in item || "noul" in item), false);
+  assert.equal("context" in body, false);
+  assert.deepEqual(Object.keys(body.state), ["candidate", "researchPlan", "evidence"]);
+  assert.equal(Object.keys(body.questions).length, 9);
+  for (const question of Object.values(body.questions) as Array<Record<string, unknown>>) {
+    assert.equal(question.type, "choice");
+    assert.equal(typeof question.instructions, "string");
+    assert.equal(typeof question.criteria, "object");
+    assert.equal("question" in question || "choices" in question, false);
+  }
   assert.equal(result.verdict, "WOULD_BLOCK");
   assert.equal(result.confidence, 0.82);
   assert.equal(result.moveValidity, "SUPPORTED");
@@ -56,9 +62,16 @@ test("maps one multi-question choice response into ShadowResult", async () => {
 
 test("missing or malformed answers become INVALID_PROVIDER_RESPONSE without raw data", async () => {
   for (const [name, response] of [
-    ["missing", jsonResponse({ answers: validResponse().answers.slice(0, 8) })],
+    [
+      "missing",
+      jsonResponse({
+        ...validResponse(),
+        answers: Object.fromEntries(Object.entries(validResponse().answers).slice(0, 8))
+      })
+    ],
     ["invalid choice", jsonResponse(validResponse({ verdict: "BUY_YES" }))],
     ["malformed", new Response("secret raw provider body", { status: 200 })],
+    ["unprocessable", new Response(null, { status: 422 })],
     [
       "oversized",
       new Response(JSON.stringify(validResponse()) + " ".repeat(2_000), {
@@ -173,12 +186,37 @@ function validResponse(overrides: Record<string, string> = {}) {
     ...overrides
   };
   return {
-    answers: Object.entries(choices).map(([id, choice]) => ({
-      id,
-      choice,
-      confidence: id === "verdict" ? 0.82 : 0.7
-    }))
+    model: "laya-system-one",
+    answers: Object.fromEntries(
+      Object.entries(choices).map(([id, selectedChoice]) => {
+        const allowed = questionChoices(id);
+        return [
+          id,
+          {
+            type: "choice",
+            choice: selectedChoice,
+            probabilities: Object.fromEntries(
+              allowed.map((choice) => [choice, choice === selectedChoice ? 0.82 : 0.01])
+            ),
+            confidence: id === "verdict" ? 0.82 : 0.7
+          }
+        ];
+      })
+    ),
+    usage: { inputTokens: 100, outputTokens: 20 }
   };
+}
+
+function questionChoices(id: string): readonly string[] {
+  if (id === "verdict") return ["PASS", "WOULD_BLOCK", "ABSTAIN"];
+  if (id === "moveValidity") {
+    return ["SUPPORTED", "EMOTION_AMPLIFIED", "INSUFFICIENT_SOURCE", "UNCONFIRMED"];
+  }
+  if (id === "primaryDriver") {
+    return ["FUNDAMENTAL_EVENT", "NARRATIVE", "LIQUIDITY", "MOMENTUM", "NOISE", "UNKNOWN"];
+  }
+  if (id === "sourceAgreement") return ["AGREE", "CONFLICT", "INSUFFICIENT"];
+  return ["HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 }
 
 function jsonResponse(value: unknown): Response {
