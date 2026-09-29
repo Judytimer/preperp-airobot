@@ -48,25 +48,38 @@ test("execution observer forwards original ACK and Fill before collecting eviden
 });
 
 test("slow Shadow can complete after fake Binance ACK and Fill without blocking execution", async () => {
-  const report = await runClosureComposition({
+  const requestStarted = testDeferred<void>();
+  const binanceFinished = testDeferred<void>();
+  const releaseLayaResponse = testDeferred<Response>();
+  const reportPromise = runClosureComposition({
     runBinance: async (context) => {
+      await withTestTimeout(
+        requestStarted.promise,
+        250,
+        "Laya request did not start before fake Binance execution"
+      );
       context.record("BINANCE_MARKET_TICK");
       context.record("BINANCE_ACK");
       context.record("BINANCE_FILL");
-      context.onFirstFillProcessed();
       context.record("BINANCE_POSITION_PERSISTED");
+      binanceFinished.resolve();
       return binanceEvidence();
     },
-    runRealLaya: async (context) => {
-      await context.waitUntilFirstFillProcessed;
-      context.record("REAL_LAYA_RECORD", { status: "COMPLETED", verdict: "PASS" });
-      return completedRecord("PASS");
-    }
+    runRealLaya: (context) =>
+      runRealLayaClosure(closureConfig(), context, async () => {
+        context.record("LAYA_REQUEST_STARTED");
+        requestStarted.resolve();
+        return releaseLayaResponse.promise;
+      })
   });
+  await withTestTimeout(binanceFinished.promise, 500, "fake Binance execution did not finish");
+  releaseLayaResponse.resolve(jsonResponse(validLayaResponse("PASS")));
+  const report = await reportPromise;
 
   assert.equal(report.overall, "PASS");
   assert.equal(report.binance.status, "PASS");
   assert.equal(report.realLaya.status, "PASS");
+  assert.ok(sequence(report, "LAYA_REQUEST_STARTED") < sequence(report, "BINANCE_ACK"));
   assert.ok(sequence(report, "BINANCE_ACK") < sequence(report, "BINANCE_FILL"));
   assert.ok(sequence(report, "BINANCE_FILL") < sequence(report, "REAL_LAYA_RECORD"));
 });
@@ -74,14 +87,8 @@ test("slow Shadow can complete after fake Binance ACK and Fill without blocking 
 test("WOULD_BLOCK cannot alter fake Binance submit qty, Fill, or Position", async () => {
   const expected = binanceEvidence();
   const report = await runClosureComposition({
-    runBinance: async (context) => {
-      context.onFirstFillProcessed();
-      return structuredClone(expected);
-    },
-    runRealLaya: async (context) => {
-      await context.waitUntilFirstFillProcessed;
-      return completedRecord("WOULD_BLOCK");
-    }
+    runBinance: async () => structuredClone(expected),
+    runRealLaya: async () => completedRecord("WOULD_BLOCK")
   });
 
   assert.equal(report.realLaya.verdict, "WOULD_BLOCK");
@@ -95,12 +102,8 @@ test("WOULD_BLOCK cannot alter fake Binance submit qty, Fill, or Position", asyn
 
 test("Shadow failure leaves fake Binance execution and reconciliation complete", async () => {
   const report = await runClosureComposition({
-    runBinance: async (context) => {
-      context.onFirstFillProcessed();
-      return binanceEvidence();
-    },
-    runRealLaya: async (context) => {
-      await context.waitUntilFirstFillProcessed;
+    runBinance: async () => binanceEvidence(),
+    runRealLaya: async () => {
       throw new Error("fake Laya failure");
     }
   });
@@ -132,10 +135,7 @@ test("real Laya closure path uses injected fake fetch and produces COMPLETED", a
 test("unreachable real Laya is reported FAIL without a fake-provider fallback", async () => {
   const config = closureConfig();
   const report = await runClosureComposition({
-    runBinance: async (context) => {
-      context.onFirstFillProcessed();
-      return binanceEvidence();
-    },
+    runBinance: async () => binanceEvidence(),
     runRealLaya: (context) =>
       runRealLayaClosure(config, context, async () => {
         throw new Error("fake connection refused");
@@ -225,10 +225,37 @@ class FakeExecutionVenue implements ExecutionVenue {
 
 function resolvedContext(): ClosureRunContext {
   return {
-    record() {},
-    onFirstFillProcessed() {},
-    waitUntilFirstFillProcessed: Promise.resolve()
+    record() {}
   };
+}
+
+function testDeferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+} {
+  let resolvePromise!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return { promise, resolve: resolvePromise };
+}
+
+async function withTestTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function closureConfig(): ClosureConfig {

@@ -74,8 +74,6 @@ export type ClosureReport = {
 
 export type ClosureRunContext = {
   readonly record: (type: string, detail?: Readonly<Record<string, unknown>>) => void;
-  readonly onFirstFillProcessed: () => void;
-  readonly waitUntilFirstFillProcessed: Promise<void>;
 };
 
 export type ClosureDependencies = {
@@ -176,23 +174,12 @@ export async function runClosureComposition(
 ): Promise<ClosureReport> {
   const timeline: ClosureTimelineEvent[] = [];
   let sequence = 0;
-  let firstFillReleased = false;
-  const firstFill = deferred<void>();
   const record = (type: string, detail?: Readonly<Record<string, unknown>>): void => {
     timeline.push({ sequence: ++sequence, at: Date.now(), type, detail });
   };
-  const releaseFirstFill = (): void => {
-    if (firstFillReleased) return;
-    firstFillReleased = true;
-    firstFill.resolve();
-  };
-  const context: ClosureRunContext = {
-    record,
-    onFirstFillProcessed: releaseFirstFill,
-    waitUntilFirstFillProcessed: firstFill.promise
-  };
+  const context: ClosureRunContext = { record };
 
-  const binancePromise = dependencies.runBinance(context).finally(releaseFirstFill);
+  const binancePromise = dependencies.runBinance(context);
   const layaPromise = dependencies.runRealLaya(context);
   const [binanceResult, layaResult] = await Promise.allSettled([
     binancePromise,
@@ -299,7 +286,6 @@ export async function runLiveBinanceClosure(
       });
       if (!stopForwardingTicks) {
         stopForwardingTicks = true;
-        context.onFirstFillProcessed();
         firstFillProcessed.resolve();
       }
     }
@@ -372,10 +358,6 @@ export async function runRealLayaClosure(
 ): Promise<ShadowRecord> {
   const { candidate, evidence } = closureShadowFixture();
   const completed = deferred<ShadowRecord>();
-  const gatedFetch: typeof fetch = async (input, init) => {
-    await waitForPromiseOrAbort(context.waitUntilFirstFillProcessed, init?.signal);
-    return fetchImpl(input, init);
-  };
   const runner = new BoundedShadowRunner({
     router: new DeterministicResearchRouter(),
     search: new MockEvidenceSearch(evidence),
@@ -383,7 +365,7 @@ export async function runRealLayaClosure(
       baseUrl: config.layaBaseUrl,
       apiKey: config.layaApiKey,
       timeoutMs: LAYA_TIMEOUT_MS,
-      fetch: gatedFetch
+      fetch: fetchImpl
     }),
     record: (record) => {
       context.record("REAL_LAYA_RECORD", {
@@ -554,27 +536,6 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
     ]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
-  }
-}
-
-async function waitForPromiseOrAbort(promise: Promise<void>, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) throw new Error("Laya request aborted");
-  if (signal === undefined) {
-    await promise;
-    return;
-  }
-  let removeListener: (() => void) | undefined;
-  try {
-    await Promise.race([
-      promise,
-      new Promise<never>((_resolve, reject) => {
-        const onAbort = (): void => reject(new Error("Laya request aborted"));
-        signal.addEventListener("abort", onAbort, { once: true });
-        removeListener = () => signal.removeEventListener("abort", onAbort);
-      })
-    ]);
-  } finally {
-    removeListener?.();
   }
 }
 
