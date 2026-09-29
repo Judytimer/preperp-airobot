@@ -429,6 +429,21 @@ Open Orders Snapshot
 - user-data disconnect gap
 - local / exchange mismatch
 
+### Joint Closure Smoke
+
+联合收官冒烟在同一次运行中并行验收 authenticated Binance execution 与真实 Laya Shadow：
+
+```powershell
+$env:BINANCE_TESTNET_API_KEY = "..."
+$env:BINANCE_TESTNET_API_SECRET = "..."
+$env:LAYA_BASE_URL = "http://127.0.0.1:8000"
+# 仅当 Laya endpoint 要求认证时设置：
+$env:LAYA_API_KEY = "..."
+npm run smoke:closure
+```
+
+该入口在任何 market tick 进入 `PerpBot` 前要求本地/venue reconciliation 一致、双方 Position 均为 FLAT、venue 无 open order 且 `recoveryRequired=false`；失败时不会撤单、平仓、删除 checkpoint 或自动修复。它使用固定 Mock Evidence 调用真实 `/v1/systemone`，不连接 Search，也不允许 Shadow verdict 进入 Binance signal/risk/order decision。首个 Fill 只停止继续转发 market tick；user-data stream 会保留到剩余 Fill、Position 持久化和最终 reconciliation 完成。`LAYA_BASE_URL` 缺失或真实 endpoint 不可用时，`CLOSURE_REPORT.realLaya` 明确为 `FAIL`，不会回退到 fake provider。
+
 ---
 
 ## Strategy
@@ -482,6 +497,8 @@ NO  → Perp SHORT
 npm run overlay
 ```
 
+这条链复用现有 `OrderRequest -> SimulatedExchange -> ACK -> Pending -> Fill`，并使用 Prediction 专用策略、风险与 long-only YES 仓位账本。`BUY_YES` Candidate 启动 `ShadowRunner` 后会立刻继续原 Risk / Execution，不等待 Shadow；Runner 在独立的 fire-and-continue 路径中执行 `deterministic ResearchPlan -> async EvidenceSearch -> async LlmStrategyReviewer -> ShadowRecord`。Candidate 是 defensive clone/deep-freeze 的 T0 输入，Runner 不读取 Bot 当前价格、持仓或后续 snapshot。普通 `npm run overlay` demo 仍使用 fake provider ports；联合收官冒烟单独使用 Mock Evidence 与真实 Laya endpoint，仍不连接真实 Search。
+
 Historical Replay：
 
 ```bash
@@ -505,6 +522,7 @@ src/
 ├─ reconciliation.ts
 ├─ recovery-evidence.ts
 ├─ binance-testnet.ts
+├─ closure-smoke.ts
 ├─ historical-replay.ts
 └─ logging.ts
 ```
@@ -519,6 +537,7 @@ src/
 - `src/state-store.ts` — checkpoint persistence
 - `src/reconciliation.ts` — local/exchange reconciliation
 - `src/binance-testnet.ts` — Binance Futures Testnet adapter
+- `src/closure-smoke.ts` — authenticated Binance + real Laya joint closure smoke
 - `src/historical-replay.ts` — historical research runner
 
 ---

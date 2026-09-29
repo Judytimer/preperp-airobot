@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node --experimental-strip-types src/index.ts",
     "demo": "node --experimental-strip-types src/interview-demo.ts",
+    "smoke:closure": "node --experimental-strip-types src/closure-smoke.ts",
     "testnet:market": "node --experimental-strip-types src/testnet-market-smoke.ts",
     "testnet": "node --experimental-strip-types src/testnet-index.ts",
     "acquire:formal-case-1": "bash scripts/acquire-formal-case-1.sh",
