@@ -1,94 +1,405 @@
-# Minimal Perp Quant Bot
+# Perp AI Trading Bot
 
-一个以本地 paper 模拟为默认模式的 TypeScript + Node.js 交易研究项目，并提供 Binance USDⓈ-M Futures Testnet 实验入口。它不碰真钱、不做 UI，也不是完整回测框架。`MovingAverageSignal` 保留为 baseline / control / execution pressure generator；Stage 2 主策略是 Meme + Prediction Overlay。
+A TypeScript + Node.js perpetual futures trading bot for **paper trading, Binance Futures Testnet, execution reliability research, and AI-assisted strategy evaluation**.
 
-## Perp Execution Baseline Path
+这个项目不是一个“只会跑策略 Demo”的量化机器人。
+
+它重点解决的是永续合约交易系统里更接近真实工程的问题：
+
+- 异步订单生命周期：`Submit → ACK → Partial Fill → Fill / Cancel`
+- Fill 延迟期间的预计仓位与重复下单问题
+- Partial Fill、乱序事件与 Fill 幂等
+- Isolated Margin、Mark Price、Maintenance Margin 与模拟强平
+- 本地状态持久化、异常重启与订单恢复
+- 本地状态与交易所权威状态的 Reconciliation
+- Binance USDⓈ-M Futures Testnet 接入
+- AI Shadow Reviewer：AI 可以辅助判断，但不能直接控制真实交易执行
+- Historical Replay：用于验证策略假设，而不是事后包装收益
+
+当前默认模式仍然是 **paper trading**。  
+项目不连接真钱账户，也不宣称实现完整交易所清算或生产级自动恢复。
+
+---
+
+## Architecture
 
 ```text
-simulateMarket
-  -> MovingAverageSignal
-  -> RiskManager
-  -> ExecutionVenue command (submit / cancel)
-
-ExecutionVenue event callback
-  -> ACK / delayed FILL / CancelAck
-  -> InFlightOrderTracker / PositionBook
-  -> console logs
+Market
+  ↓
+Strategy
+  ↓
+Risk Manager
+  ↓
+Execution Command
+  ↓
+Exchange / Simulator
+  ↓
+ACK / Partial Fill / Fill / CancelAck
+  ↓
+Order Tracker
+  ↓
+Position / Margin
+  ↓
+Checkpoint
+  ↓
+Reconciliation
 ```
 
-风控使用 `已成交 Position + unresolved Orders` 计算预计仓位，避免 Fill 延迟期间重复下单。Core 在 submit 前生成并跟踪 `clientOrderId`；adapter 后续提供独立的 `exchangeOrderId`。命令结果不携带 future Fill，Fill/CancelAck 只通过 execution event callback 进入状态机。
+AI Research Path 与交易执行链保持隔离：
 
-订单生命周期由 `InFlightOrderTracker` 持有：成交路径为 `SUBMITTED -> ACKED -> PARTIALLY_FILLED -> FILLED`；撤单路径为 `SUBMITTED/ACKED/PARTIALLY_FILLED -> CANCEL_REQUESTED -> CANCELED`。只有 venue execution event 中的 `CancelAck` 才能确认 `CANCELED`。发生 Partial Fill 后，预计仓位使用已成交 Position 加订单 `remainingQty`，不会把整张原始订单重复计入，也不会过早移除 Pending。
+```text
+Strategy Candidate
+  ↓
+AI Shadow Reviewer
+  ↓
+PASS / WOULD_BLOCK / ABSTAIN
+  ↓
+Research Record
 
-第二轮加入了最小逐仓保证金账户。行情明确区分 `lastPrice / markPrice / indexPrice`：Baseline 双均线和模拟订单价格只使用 last，逐仓账户、未实现盈亏与强平触发只使用 mark，index 目前仅代表外部参考输入；本模拟器没有实现交易所级 mark-price 推导。强平触发与执行已分开建模，但当前 paper simplification 仍假设 `liquidation execution price = mark price`，日志会同时记录 trigger mark 与 execution price。下单前检查目标仓位初始保证金，`equity <= maintenanceMargin` 时模拟强平、向 exchange 发起 cancel request，并在 CancelAck 后确认 `CANCELED`，然后停止策略继续下单。它仍然只是 paper model，不代表真实交易所清算流程。
-
-第三轮加入版本化 checkpoint。submit 前的 client intent、ACK、有效 Fill 和模拟强平会原子写入 `.runtime/perp-bot-state.json`，保存客户端订单 identity/序号、仓位、Fill 幂等集合和订单状态；simulator 自己的 venue sequence 不属于 Core checkpoint。正常完成的状态可恢复；如果重启时仍有 unresolved order（包括 `SUBMITTED`），机器人进入 `RECOVERY_REQUIRED` 并停止下单，不猜测该订单最终是否成交。
-
-Reconciliation 目前提供只读比较边界：输入本地 Position / open orders 与权威 exchange snapshot，报告 position mismatch、missing/unexpected order 和 remaining quantity mismatch。它不会自动覆盖任一侧状态；恢复策略仍保持 fail-closed。
-
-Recovery Evidence contract 进一步要求 venue/account/symbol identity、`asOf`、完整 open-orders 声明、权威 position、terminal order facts 与 checkpoint 后 fills。该 contract 只验证 evidence 是否足够进入未来 M2B 设计，不修改本地状态，也不包含 fresh mark。
-
-Funding 作为独立结算事件输入：事件携带 `fundingId / rate / markPrice / ts`，正费率下多仓支付、空仓收取，负费率方向相反。Funding 修改 realized equity，但无权覆盖最新 market mark；`fundingId` 会进入 checkpoint，以保证重启后的重复结算仍然幂等。当前不包含 funding alpha 或交易所费率预测。
-
-Historical Replay 提供最小研究记录边界：Baseline 与 AI Shadow 同时留档，所有证据必须满足 T0，Ground Truth 规则必须在 T0 前定义，outcome 只能在预设窗口结束后记录。每个记录显式区分 `DEMO / QUALITATIVE_ONLY / FORMAL`、`MEASURED / NOT_MEASURABLE` 和 `ARCHIVED / RECONSTRUCTED / MIXED` input provenance；`FORMAL` 必须具备 archived inputs 与 measured outcome。Catalyst/evidence ground truth 与 trading verdict 独立记录，`CONFIRMED` 不自动等于 `PASS`。Candle loader 还校验声明的 interval、连续性以及最后一根 candle 对 T0 的 freshness。该 runner 只产出研究记录，不把 Shadow verdict 映射成订单或 PerpIntent。
-
-```bash
-npm run replay
+        ✕
+不会直接修改真实交易执行
 ```
 
-真实 FOMC artifacts 仅通过 `npm run acquire:formal-case-1` 获取；脚本先写临时文件，只有 curl exit 0 且 HTTP 2xx 才发布 `.raw` 与 metadata/checksum。失败响应会被清理，不能进入 adapter admission。
+---
 
-该命令输出 schema smoke fixture，以及第一个真实事件 replay：2024-01-09 SEC X 账号被入侵事件。Baseline LONG 由最小 candle fixture 经真实 `MovingAverageSignal(3,6)` 重放产生，不再手写；诊断显示第一条可计算的 LONG 在 21:11，但此前都处于 warm-up，因此不能证明消息触发了 crossover。加上 candle 是 reconstruction、原始消息没有由项目在 T0 归档、Shadow 也由事后重放，该案例仍为 `QUALITATIVE_ONLY / NOT_MEASURABLE`，并被 formal filter 排除。
+## Engineering Highlights
 
-FORMAL candidate selection 使用纯函数寻找 event release 后、固定 cutoff 前的第一个 actionable MA crossover；HOLD/FLAT → LONG/SHORT 有效，warm-up 后的首个 signal 不算 crossover。Baseline Candidate Outcome 固定为 T0 close 零延迟 paper 成交后持有 15 分钟，并以方向收益 `±50bps` 判定 SUCCESS/FAILURE，中间为 NEUTRAL；结束时间必须严格早于下一 independent catalyst。Baseline 与 Shadow counterfactual 使用同一成交假设，不建模 slippage、next-open 或 order book。样本仅研究 post-event 能产生 actionable crossover 的条件事件，不能解释为 AI alpha 或 unconditional event performance。当前这些规则只有 synthetic DEMO burn-in，尚未把缺失的 raw artifacts 包装成 FORMAL case。
+### 1. Async Order Lifecycle
 
-## 运行
+订单不是 `submit()` 成功就等于成交。
 
-首次拉取包含 Testnet connector 的版本后先安装依赖：
+Core 将交易命令和交易事件分开建模：
+
+```text
+SUBMITTED
+  ↓
+ACKED
+  ↓
+PARTIALLY_FILLED
+  ↓
+FILLED
+```
+
+撤单同样必须等待交易所事件确认：
+
+```text
+ACKED / PARTIALLY_FILLED
+  ↓
+CANCEL_REQUESTED
+  ↓
+CancelAck
+  ↓
+CANCELED
+```
+
+REST 请求成功不会被直接当成 ACK，Fill 和 CancelAck 只通过 execution event 推进订单状态。
+
+---
+
+### 2. Projected Position
+
+真实交易中，订单提交以后到 Fill 到达之前存在时间窗口。
+
+如果只根据已成交仓位计算风险，机器人可能在 Fill 延迟期间重复下单。
+
+因此风控使用：
+
+```text
+Projected Position
+=
+Filled Position
++
+Unresolved Order Remaining Qty
+```
+
+Partial Fill 后只计算剩余未成交数量，不会重复计算整张原始订单。
+
+---
+
+### 3. Partial Fill & Idempotency
+
+系统显式处理：
+
+- Partial Fill
+- 延迟 Fill
+- Fill-before-ACK 异常
+- 重复 Fill
+- 乱序事件
+- 跨零仓位更新
+
+有效 Fill 会进入 checkpoint 的幂等集合，避免重启或事件重放造成重复加仓。
+
+---
+
+### 4. Isolated Margin & Liquidation Model
+
+行情区分：
+
+```text
+lastPrice
+markPrice
+indexPrice
+```
+
+其中：
+
+- Strategy / simulated execution 使用 `lastPrice`
+- Unrealized PnL / Margin / Liquidation 使用 `markPrice`
+- `indexPrice` 仅作为外部参考输入
+
+系统实现最小逐仓模型：
+
+```text
+Position
+→ Initial Margin
+→ Maintenance Margin
+→ Equity
+→ Liquidation Trigger
+```
+
+当前 paper model 为了保持边界清晰，模拟强平价格直接使用 mark price，不宣称复刻真实交易所清算引擎。
+
+---
+
+### 5. Checkpoint & Fail-Closed Recovery
+
+Core 将以下状态原子写入：
+
+```text
+.runtime/perp-bot-state.json
+```
+
+包括：
+
+- client order identity
+- order sequence
+- position
+- order state
+- processed fills
+- funding events
+
+如果程序重启时存在 unresolved order：
+
+```text
+SUBMITTED
+ACKED
+PARTIALLY_FILLED
+CANCEL_REQUESTED
+```
+
+系统不会猜测订单最终状态，而是进入：
+
+```text
+RECOVERY_REQUIRED
+```
+
+并停止继续下单。
+
+---
+
+### 6. Reconciliation
+
+恢复时，本地状态不能直接假设自己是正确的。
+
+系统支持只读比较：
+
+```text
+Local Position
+vs
+Exchange Position
+
+Local Open Orders
+vs
+Exchange Open Orders
+```
+
+检测：
+
+- position mismatch
+- missing order
+- unexpected order
+- remaining quantity mismatch
+
+当前版本采取 **fail-closed**：
+
+发现不一致后停止交易，不自动覆盖本地状态，也不擅自重发订单。
+
+---
+
+### 7. Binance Futures Testnet
+
+项目提供 Binance USDⓈ-M Futures Testnet adapter。
+
+策略和 Core 不依赖 Binance SDK，adapter 只负责：
+
+```text
+Market Data
+Order Submit
+Order Cancel
+User Data Stream
+Exchange Event Translation
+```
+
+交易所事件会被翻译为项目内部统一事件：
+
+```text
+ACK
+Fill
+CancelAck
+```
+
+Testnet runner 要求：
+
+- One-way Mode
+- BTCUSDT
+- Isolated Margin
+
+REST 下单请求关闭自动 retry，避免网络超时情况下生成潜在重复订单。
+
+---
+
+### 8. AI Shadow Reviewer
+
+AI 当前不是交易决策者。
+
+它只能在独立 Shadow Path 中对策略 Candidate 做研究性判断：
+
+```text
+PASS
+WOULD_BLOCK
+ABSTAIN
+```
+
+但 Shadow 结果不能：
+
+- 修改原 Strategy Signal
+- 修改 Risk Decision
+- 阻止确定性退出逻辑
+- 直接生成 Perp Order
+- 直接控制交易所
+
+这是刻意设计的权限边界：
+
+> 先验证 AI 有没有稳定的信息增益，再讨论是否允许它影响交易。
+
+---
+
+### 9. Historical Replay
+
+Historical Replay 用于验证策略判断，而不是制造“AI 好像预测成功”的案例。
+
+每个案例明确记录：
+
+```text
+T0
+Input Provenance
+Ground Truth Rule
+Outcome Window
+Baseline Result
+Shadow Result
+```
+
+并区分：
+
+```text
+DEMO
+QUALITATIVE_ONLY
+FORMAL
+```
+
+只有满足：
+
+- T0 前已存在的输入
+- 可验证的历史原始数据
+- 预先定义的 Ground Truth
+- 可测量 Outcome
+
+才允许进入 `FORMAL`。
+
+这可以避免典型的 hindsight bias：
+
+> 事件发生以后重新搜资料，再声称 AI 当时能够判断出来。
+
+---
+
+## Quick Start
+
+### Environment
+
+```text
+Node.js 22+
+npm
+```
+
+项目使用 Node.js `--experimental-strip-types`，无需额外 TypeScript 编译步骤。
+
+安装依赖：
 
 ```bash
 npm install
 ```
 
-默认本地 paper 运行：
+运行默认 paper bot：
 
 ```bash
 npm start
+```
+
+运行完整工程 Demo：
+
+```bash
 npm run demo
 ```
 
-`npm run demo` 会依次展示 Partial Fill 生命周期、exchange-confirmed cancel 后的模拟强平，以及 restart 后的只读 reconciliation report。
-
-你会看到类似这些日志：
+Demo 会展示：
 
 ```text
-[TICK] ...
-[SIGNAL] ...
-[RISK] approved ...
-[ACK] ...
-[FILL] ...
-[POSITION] ...
+Market Tick
+→ Signal
+→ Risk
+→ Submit
+→ ACK
+→ Partial Fill
+→ Fill
+→ Position
+→ Margin
+→ Checkpoint
+→ Reconciliation
 ```
 
-## 测试
+---
+
+## Tests
 
 ```bash
 npm test
 ```
 
-测试覆盖了核心闭环：价格 tick 触发双均线信号，风控批准订单，模拟交易所先 ACK，延迟 Fill 后更新 Position；也覆盖 projected position、乱序 Fill、目标仓位 delta 和跨零 Partial Fill。
+测试覆盖核心交易边界，包括：
 
-## Binance USDⓈ-M Futures Testnet
+- Signal → Order → ACK → Fill
+- Projected Position
+- Partial Fill
+- Fill idempotency
+- Out-of-order Fill
+- Target position delta
+- Cross-zero position
+- Margin validation
+- Liquidation path
+- Checkpoint recovery
+- Reconciliation
 
-第一条真实 venue 边界使用 Binance 官方模块化 TypeScript connector，并在代码里固定为 Testnet URL。策略和 Core 不调用 SDK；adapter 只负责真实行情、symbol filter 预检、下单/撤单 transport，以及把 user-data `ORDER_TRADE_UPDATE` 翻译为现有 `ACK / Fill / CancelAck`。
+---
 
-无凭证的只读行情 smoke（不会下单）：
+## Binance Futures Testnet
+
+无 API Key 时可以先运行只读行情：
 
 ```bash
 npm run testnet:market
 ```
 
-有 Binance Futures Testnet key 后运行 12 个真实行情 tick 的最小执行闭环：
+配置 Binance Futures Testnet：
 
 ```powershell
 $env:BINANCE_TESTNET_API_KEY = "..."
@@ -96,47 +407,162 @@ $env:BINANCE_TESTNET_API_SECRET = "..."
 npm run testnet
 ```
 
-Testnet runner 要求账户使用 One-way Mode 且 `BTCUSDT` 为 isolated margin；否则启动即 fail closed。它使用独立 checkpoint `.runtime/binance-testnet-state.json`，结束时会拉取权威 position/open-orders snapshot 并打印只读 reconciliation report。REST `newOrder` 的自动 retry 被关闭；REST command completion 不会被当成 ACK，只有 user-data stream 的 `NEW` 才推进本地订单状态。当前仍保持 fail-closed：如果出现 submit timeout、Fill-before-ACK、断线 gap 或本地/交易所不一致，应停机并对账，而不是自动重发订单。
+Testnet 使用独立 checkpoint：
 
-实验过程、故障日志与字段卡见 [`docs/learning-report.md`](docs/learning-report.md)。
+```text
+.runtime/binance-testnet-state.json
+```
 
-## 代码入口
+运行结束后会获取交易所权威：
 
-- `src/index.ts`: 可运行示例
-- `src/bot.ts`: 闭环编排
-- `src/market.ts`: 模拟行情
-- `src/strategy.ts`: 简单双均线信号
-- `src/risk.ts`: 最小风控
-- `src/exchange.ts`: 最小 execution command/event boundary 与模拟 adapter
-- `src/binance-testnet.ts`: Binance USDⓈ-M Testnet 行情、execution adapter 与事件映射
-- `src/order-tracker.ts`: In-flight order、累计成交、剩余数量与状态
-- `src/margin.ts`: 逐仓权益、保证金门槛与强平条件
-- `src/state-store.ts`: 版本化 checkpoint 与原子 JSON 文件存储
-- `src/reconciliation.ts`: 本地状态与 exchange snapshot 的只读一致性报告
-- `src/recovery-evidence.ts`: M2A authoritative recovery evidence contract 与 validation
-- `src/coinbase-candle-adapter.ts`: Coinbase raw candle 字段、时间与 gap 的 fail-closed adapter
-- `src/historical-replay.ts`: T0-safe Historical Replay schema 与研究记录 runner
-- `src/position.ts`: 持仓更新
-- `src/logging.ts`: 日志格式
+```text
+Position Snapshot
+Open Orders Snapshot
+```
 
-> 运行依赖 Node.js 22 的 `--experimental-strip-types`，所以不需要安装 TypeScript 编译器。
+并执行一次只读 reconciliation。
 
-## Stage 2 Strategy Research Path: Meme + Prediction Overlay
+出现以下异常时系统保持 fail-closed：
 
-Stage 2 主策略是一条纯模拟 Overlay 链：Meme 现货明显上涨后，不增加现货仓位，而是在固定最大 premium 风险预算内 paper BUY 更高 FDV 目标的 YES；YES 价格达到退出阈值后 paper SELL 全部份额。Prediction YES 与 Perp 保持独立业务语义，不存在 YES 到 Perp LONG/SHORT 的映射。
+- submit timeout
+- Fill-before-ACK
+- user-data disconnect gap
+- local / exchange mismatch
+
+---
+
+## Strategy
+
+### Execution Baseline
+
+项目保留简单 Moving Average Strategy 作为：
+
+```text
+baseline
+control
+execution pressure generator
+```
+
+它的职责不是证明交易 Alpha，而是稳定地产生交易行为，用来压力测试：
+
+```text
+Risk
+Order Lifecycle
+Partial Fill
+Position
+Margin
+Recovery
+Reconciliation
+```
+
+---
+
+## AI Strategy Research
+
+项目还包含一个实验性：
+
+```text
+Meme + Prediction Overlay
+```
+
+当 Meme asset 已明显上涨时，策略不会继续追高现货，而是在固定最大风险预算下模拟购买更高 FDV 目标对应的 Prediction YES。
+
+Prediction Market 与 Perpetual Futures 保持独立业务语义，不存在：
+
+```text
+YES → Perp LONG
+NO  → Perp SHORT
+```
+
+当前 AI 只运行于 Shadow Mode。
+
+运行：
 
 ```bash
 npm run overlay
 ```
 
-这条链复用现有 `OrderRequest -> SimulatedExchange -> ACK -> Pending -> Fill`，并使用 Prediction 专用策略、风险与 long-only YES 仓位账本。`BUY_YES` Candidate 启动 `ShadowRunner` 后会立刻继续原 Risk / Execution，不等待 Shadow；Runner 在独立的 fire-and-continue 路径中执行 `deterministic ResearchPlan -> async EvidenceSearch -> async LlmStrategyReviewer -> ShadowRecord`。Candidate 是 defensive clone/deep-freeze 的 T0 输入，Runner 不读取 Bot 当前价格、持仓或后续 snapshot。当前只有 fake provider ports，尚未选择或连接真实 Search / LLM provider。
+Historical Replay：
 
-AI 当前严格处于 **SHADOW**：`PASS / WOULD_BLOCK / ABSTAIN` 只存在于 `COMPLETED` record，不能修改原始 Overlay signal、risk decision 或 execution，也不能直接下单。Provider failure 使用独立 status 与 allowlist error code，不伪装成 `ABSTAIN`；证据正常返回但不足则是 `COMPLETED + ABSTAIN + INSUFFICIENT_SOURCE`。Runner 默认最多两个 in-flight task，容量满时立即记录 `SKIPPED_CAPACITY`，不排队；`drain(timeoutMs)` 只供测试和进程优雅退出，超时任务记录 `INCOMPLETE`，严禁由 `onSnapshot`、Risk 或 Execution 调用。当前 SHADOW 安全边界只 review 入场 Candidate；deterministic 退出绕过 Reviewer且不可被 AI 阻断。这是当前阶段的权限边界，不是永久策略规则。
+```bash
+npm run replay
+```
 
-实现说明和未经验证的假设见 [`docs/overlay-learning-report.md`](docs/overlay-learning-report.md)。
+---
 
-Partial Fill 实验见 [`docs/partial-fill-learning-report.md`](docs/partial-fill-learning-report.md)。
+## Repository Structure
 
-逐仓保证金与模拟强平说明见 [`docs/isolated-margin-learning-report.md`](docs/isolated-margin-learning-report.md)。
+```text
+src/
+├─ bot.ts
+├─ strategy.ts
+├─ risk.ts
+├─ exchange.ts
+├─ order-tracker.ts
+├─ position.ts
+├─ margin.ts
+├─ state-store.ts
+├─ reconciliation.ts
+├─ recovery-evidence.ts
+├─ binance-testnet.ts
+├─ historical-replay.ts
+└─ logging.ts
+```
 
-持久化与重启恢复说明见 [`docs/checkpoint-recovery-learning-report.md`](docs/checkpoint-recovery-learning-report.md)。
+核心入口：
+
+- `src/bot.ts` — trading loop orchestration
+- `src/exchange.ts` — execution command/event boundary
+- `src/order-tracker.ts` — in-flight order lifecycle
+- `src/position.ts` — position accounting
+- `src/margin.ts` — isolated margin model
+- `src/state-store.ts` — checkpoint persistence
+- `src/reconciliation.ts` — local/exchange reconciliation
+- `src/binance-testnet.ts` — Binance Futures Testnet adapter
+- `src/historical-replay.ts` — historical research runner
+
+---
+
+## Engineering Notes
+
+完整设计过程和实验记录放在 `docs/`：
+
+- Partial Fill experiments
+- Isolated Margin
+- Checkpoint & Recovery
+- Binance Testnet
+- Prediction Overlay
+- Historical Replay
+- Recovery Evidence
+
+README 展示当前系统最终形态。
+
+`docs/` 保留：
+
+> 为什么这么设计、踩过什么坑、哪些假设被推翻，以及后续如何继续演进。
+
+---
+
+## Current Boundary
+
+这个项目目前定位为：
+
+> **Perpetual Futures Trading Engineering Research Bot**
+
+重点是交易执行可靠性、状态一致性、恢复边界以及 AI 辅助交易架构。
+
+当前明确不包含：
+
+- Real-money trading
+- Production-grade exchange HA
+- Full backtesting engine
+- Exchange liquidation engine replication
+- Automatic reconciliation repair
+- AI autonomous trading
+- Proven profitable strategy
+
+这些边界是刻意保留的。
+
+项目首先证明的是：
+
+> **在 AI Coding 能快速生成代码之后，如何把交易业务语义、状态一致性、异常恢复和 AI 权限边界真正落实到一个可运行系统里。**
