@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ClosureTickGate,
   ObservedExecutionVenue,
   readClosureConfig,
   runClosureComposition,
@@ -45,6 +46,25 @@ test("execution observer forwards original ACK and Fill before collecting eviden
   assert.deepEqual(observed.getAcknowledgements(), [ack]);
   assert.deepEqual(observed.getFills(), [fill]);
   assert.deepEqual(processed, [ack, fill]);
+});
+
+test("closure stops forwarding ticks immediately after the first observed submit", async () => {
+  const inner = new FakeExecutionVenue();
+  const tickGate = new ClosureTickGate();
+  const observed = new ObservedExecutionVenue(inner, {
+    onSubmit: () => tickGate.stopAfterFirstSubmit()
+  });
+  let botTickCalls = 0;
+  const forwardTick = async (): Promise<boolean> =>
+    await tickGate.forward(async () => {
+      botTickCalls += 1;
+      await observed.submit(submission());
+    });
+
+  assert.equal(await forwardTick(), true);
+  assert.equal(await forwardTick(), false);
+  assert.equal(botTickCalls, 1);
+  assert.equal(observed.getSubmissions().length, 1);
 });
 
 test("slow Shadow can complete after fake Binance ACK and Fill without blocking execution", async () => {

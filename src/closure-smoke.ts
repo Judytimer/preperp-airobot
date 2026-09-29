@@ -169,6 +169,21 @@ export class ObservedExecutionVenue implements ExecutionVenue {
   }
 }
 
+/** Composition-only gate that stops new market ticks after the first submit. */
+export class ClosureTickGate {
+  private stopForwardingTicks = false;
+
+  stopAfterFirstSubmit(): void {
+    this.stopForwardingTicks = true;
+  }
+
+  async forward(onTick: () => Promise<void>): Promise<boolean> {
+    if (this.stopForwardingTicks) return false;
+    await onTick();
+    return true;
+  }
+}
+
 export async function runClosureComposition(
   dependencies: ClosureDependencies
 ): Promise<ClosureReport> {
@@ -256,10 +271,11 @@ export async function runLiveBinanceClosure(
     transport
   });
   let bot: PerpBot | undefined;
-  let stopForwardingTicks = false;
+  const tickGate = new ClosureTickGate();
   const firstFillProcessed = deferred<void>();
   const observedVenue = new ObservedExecutionVenue(venue, {
     onSubmit: (command) => {
+      tickGate.stopAfterFirstSubmit();
       context.record("BINANCE_SUBMIT", {
         clientOrderId: command.clientOrderId,
         side: command.request.side,
@@ -284,10 +300,7 @@ export async function runLiveBinanceClosure(
         side: bot?.getPosition().side,
         qty: bot?.getPosition().qty
       });
-      if (!stopForwardingTicks) {
-        stopForwardingTicks = true;
-        firstFillProcessed.resolve();
-      }
+      firstFillProcessed.resolve();
     }
   });
   bot = await PerpBot.create({
@@ -317,10 +330,11 @@ export async function runLiveBinanceClosure(
 
     feedStarted = true;
     await feed.start(async (tick) => {
-      if (stopForwardingTicks) return;
-      marketTicks += 1;
-      context.record("BINANCE_MARKET_TICK", { seq: tick.seq });
-      await bot!.onTick(tick);
+      await tickGate.forward(async () => {
+        marketTicks += 1;
+        context.record("BINANCE_MARKET_TICK", { seq: tick.seq });
+        await bot!.onTick(tick);
+      });
     });
     await withTimeout(
       firstFillProcessed.promise,
