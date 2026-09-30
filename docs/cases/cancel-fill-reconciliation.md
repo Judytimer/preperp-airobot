@@ -103,6 +103,6 @@ RECONCILIATION_REQUIRED
 
 ## 6. 证据边界
 
-本仓库此前在 2026-09-19 已对 Hummingbot 官方源码的 `InFlightOrder`、`ClientOrderTracker` 和 Binance connector 做过源码审计，记录在 `docs/stage3-hummingbot-audit.md`。本轮沿用这些源码入口并针对 Cancel × Fill 重新组织结论。
+本仓库此前在 2026-09-19 已对 Hummingbot 官方源码的 `InFlightOrder`、`ClientOrderTracker` 和 Binance connector 做过源码审计，记录在 `../archive/reviews/hummingbot-audit-2026-09-19.md`。本轮沿用这些源码入口并针对 Cancel × Fill 重新组织结论。
 
 当前执行环境访问 GitHub 时返回 HTTP 403，无法在本轮把 `master` 固定到新的 commit SHA。因此本文只冻结设计判断，不声称已验证 2026-09-23 的最新实现；正式状态机 Patch 前必须重新访问官方仓库并固定 SHA。
