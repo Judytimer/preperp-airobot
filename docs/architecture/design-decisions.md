@@ -1,253 +1,138 @@
-# Design Decisions
+# 关键架构决策
 
-> This document records deliberate decisions confirmed by repository reality, failure traces, and later audit corrections.
+> 只记录经过当前源码、确定性 Failure Case 和后期 Repo Reality 审计仍然成立的稳定判断。
 
-## 1. Repository Reality Overrides Planning Documents
-
-Architecture claims are based on the latest repository behavior, deterministic traces, and implementation diffs.
-
-Priority of evidence:
+## 1. 当前代码事实优先于旧计划
 
 ```text
-latest repo / deterministic trace
+当前源码 / deterministic trace
 >
-Repo Reality audit
+后期 Repo Reality 审计
 >
-final planning spec
+最终推进规范
 >
-older architecture audit
+早期架构审计
 >
-early ideas
+最初设想
 ```
 
-A document being silent does not prove the code lacks a capability.
+文档没写，不代表代码没做；代码里出现一个类，也不代表问题已经真正解决。
 
-A class existing also does not prove an engineering invariant is solved.
+## 2. 永续交易 Core 优先于策略复杂度
 
-## 2. Perpetual Core Before Strategy Complexity
+优先级：Order Lifecycle → Position / Projected Position → Risk → Margin → Funding → Liquidation → Failure / Recovery → Reconciliation。
 
-Engineering priority:
+策略可以替换，但这些交易语义不能因为策略变复杂而变模糊。
 
-1. Order Lifecycle
-2. Position / Projected Position
-3. Risk
-4. Margin
-5. Funding
-6. Liquidation
-7. Failure / Recovery
-8. Reconciliation
+## 3. 工程对齐不等于搬运别人的策略
 
-Strategy complexity must not weaken these boundaries.
+Hummingbot、NautilusTrader、Passivbot 主要用于参考 Connector 边界、订单生命周期、Execution 语义、Recovery / Reconciliation 和 Perp 领域建模，不搬运它们的交易策略。
 
-## 3. Engineering Alignment Is Not Strategy Migration
-
-Open-source projects are references for:
-
-- connector boundaries;
-- order state;
-- execution semantics;
-- recovery;
-- reconciliation;
-- perpetual-domain behavior.
-
-Their strategies are not copied into this project by default.
-
-## 4. Intent Is Not Fact
-
-These are not equivalent:
+## 4. Intent 不是 Fact
 
 ```text
-cancel requested = canceled
-submit timeout = order absent
-local state = venue truth
+发出 cancel request ≠ 已取消
+submit timeout ≠ 交易所没收到订单
+本地状态 ≠ 交易所事实
 ```
 
-Execution facts and order facts outrank local mirror and intent.
+事实优先级：
 
-## 5. Local State Must Not Erase Authoritative Execution
+```text
+Exchange execution fact
+>
+Exchange order fact
+>
+Local mirror
+>
+Intent
+```
 
-A new valid exchange-reported fill cannot be silently discarded solely because local state says `CANCELED`.
+## 5. 本地状态不能抹掉权威成交事实
 
-This invariant came from the Liquidation × Late Fill failure reproduction.
+Liquidation × Late Fill 实验暴露的核心 invariant：
 
-## 6. Submit Completion Is Not ACK
+> 本地订单状态不能静默抹掉一个有效、唯一、来自交易所侧的成交事实。
 
-A submit command returning does not imply that an ACK has already been established as an independent execution fact.
+## 6. Command 完成不等于 ACK
 
-Command and event must remain separate.
+`submit()` 返回只表示命令调用完成。ACK / Fill / CancelAck 必须通过独立 execution event 推进状态。
 
-## 7. Ambiguous Submit Is Not a Generic Retry Problem
-
-A generic retry helper can be unsafe:
+## 7. Ambiguous Submit 不能靠通用 Retry
 
 ```text
 submit
 → timeout
-→ venue may have accepted
-→ blind retry
-→ duplicate order
+→ 交易所可能已接单
+→ 无脑 retry
+→ 重复订单
 ```
 
-Order identity, ambiguity, recovery, and reconciliation remain domain concerns.
+因此 signed order submit 不使用普通自动重试；必须依赖 clientOrderId、交易所证据和 reconciliation。
 
-## 8. Core Owns clientOrderId
+## 8. clientOrderId 由 Core 提前拥有
 
-The core creates and persists client order identity before submit.
+Core 在越过 venue boundary 前生成并持久化 `clientOrderId`，Exchange/venue 再绑定 `exchangeOrderId`。即使 ACK 丢失，本地仍知道自己刚刚提交的是哪张订单。
 
-The venue owns venue-side identity and internal sequence.
+## 9. Risk 必须看 Projected Position
 
-This avoids making local recoverability depend on a venue response that may never arrive.
+风控读取 filled Position + unresolved order remaining quantity，避免 Fill 延迟期间误判“还有仓位空间”并重复下单。
 
-## 9. Projected Exposure Belongs in Risk
+## 10. Reconciliation 不等于 Recovery
 
-Risk evaluates filled position plus unresolved order exposure.
+Reconciliation：本地和交易所哪里不一致？  
+Recovery：拿到足够权威证据后，怎样安全收敛并重新允许交易？
 
-A delayed fill must not create false available risk capacity.
+当前已有只读 reconciliation 和 Recovery Evidence contract；完整 recovery mutation 仍延期。
 
-## 10. Reconciliation Is Not Recovery
+## 11. 不确定时 Fail Closed
 
-Reconciliation answers:
+重启或网络异常后，如果不能证明 unresolved order 的最终状态，进入 `RECOVERY_REQUIRED` 并停止新交易。
 
-> Where do local and external facts disagree?
+## 12. Checkpoint 不等于完整事件历史
 
-Recovery answers:
-
-> Given sufficient authoritative evidence, how do we safely converge state and reopen trading?
-
-The current project has reconciliation and a recovery-evidence contract.
-
-Full recovery mutation is deferred.
-
-## 11. Fail Closed on Unknown Execution State
-
-When the external truth cannot be proven after restart or ambiguity, the system stops trading.
-
-`RECOVERY_REQUIRED` is intentionally conservative.
-
-## 12. Snapshot Is Not Event Provenance
-
-Checkpoint answers:
-
-> What state do we currently believe?
-
-It does not fully explain every event ordering.
-
-A complete EventLog is deferred because current failures have not proved it necessary.
-
-The current alternative is:
+当前证据还没有证明必须上完整 EventLog / Event Sourcing。现阶段采用：
 
 ```text
 Atomic Snapshot
 +
 Processed IDs
 +
-Unresolved Order Detection
+Unresolved Detection
 +
 RECOVERY_REQUIRED
 +
-Future Exchange Reconciliation
+Exchange Reconciliation
 ```
 
-## 13. Event Arrival Time Is Not Execution Time
+## 13. 到达时间不等于撮合时间
 
-A late-arriving event may describe an earlier venue execution.
+真正的 S2 cancel/fill race 可能是先撮合、后取消生效、Fill 更晚才到本地。未来需要区分 `executionAt`、`cancelEffectiveAt`、`receivedAt`。
 
-Therefore:
+## 14. Schema Taste 不等于工程债
 
-```text
-receivedAt
-```
+字段“不够漂亮”不代表必须重构。只有它破坏 invariant、导致 failure、或阻碍 recovery / reconciliation，才升级为当前 Decision Debt。
 
-must not automatically be treated as:
+## 15. Simulator 已经存在
 
-```text
-executionAt
-```
+早期“缺 Fake Exchange Simulator”的审计结论已被 Repo Reality 推翻。真正的小缺口是故障场景是否足够 fixture 化和可重复回归。
 
-This becomes especially important in true cancel/fill races.
+## 16. 复杂度由 Failure 驱动
 
-## 14. Schema Taste Is Not Decision Debt
+只有可复现 failure、新 connector 约束、reconciliation 无法安全收敛、Testnet/venue evidence 或明确 JD 要求出现时，才增加架构。
 
-Architecture review must distinguish:
+## 17. AI 不能绕过确定性 Risk
 
-```text
-schema taste
-```
+AI 可以观察、找证据、打标签、输出 review verdict；不能直接下单、改杠杆/仓位、绕过 Risk、自动反手或清除 Recovery gate。
 
-from:
-
-```text
-a correctness problem proven by a failure
-```
-
-Examples such as side/qty representation, single entryPrice shape, or event sequence fields should not become mandatory work unless they alter an actual invariant or recovery decision.
-
-## 15. Simulator Already Exists
-
-Earlier audits that treated “missing fake exchange simulator” as a major gap were incorrect.
-
-The actual lower-cost gap is reproducibility and fixture quality, not simulator existence.
-
-## 16. Failure-Driven Complexity
-
-Add complexity when one of these is true:
-
-- a reproducible failure requires it;
-- a connector introduces it;
-- reconciliation cannot converge without it;
-- a target role explicitly requires it;
-- testnet/paper evidence exposes the gap.
-
-Do not add architecture because a mature framework has it.
-
-## 17. AI Cannot Bypass Deterministic Risk
-
-AI currently remains research/review only.
-
-It may:
-
-- observe;
-- label;
-- attach evidence;
-- return a review verdict;
-- create research records.
-
-It may not directly control:
-
-- order submission;
-- leverage;
-- size;
-- stop loss;
-- risk bypass;
-- automatic reversal.
-
-## 18. Prediction Signal Is Not Automatically PerpIntent
-
-A prediction-market or external signal may be:
-
-- research signal;
-- evidence;
-- external context;
-- catalyst confirmation.
-
-But:
-
-```text
-YES appears underpriced
-```
-
-does not automatically imply:
-
-```text
-LONG a perpetual
-```
-
-The bridge remains explicit:
+## 18. Prediction Signal 不等于 PerpIntent
 
 ```text
 Research Signal
 → Trading Thesis
 → PerpIntent
+→ Deterministic Risk
+→ Execution
 ```
 
-This is unresolved business semantics and must not be invented by code generation.
+`Trading Thesis → PerpIntent` 仍是业务语义，不允许代码生成工具自行补全。

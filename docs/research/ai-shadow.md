@@ -1,83 +1,38 @@
-# AI Shadow Research
+# AI Shadow：为什么 AI 只做副驾驶
 
-> Status: implemented research boundary; not execution authority.
+> 当前状态：AI 是研究与审查层，不拥有交易执行权。
 
-## Purpose
+## 1. 研究问题
 
-The AI layer asks a narrow question:
+> 在不控制真实交易的前提下，AI Reviewer 能不能提高证据质量，或者减少一部分明显的假机会？
 
-> Can a reviewer improve evidence quality or reduce obvious false opportunities without being granted control over execution?
-
-It is intentionally separated from the trading core.
-
-## Current Role
+## 2. 当前链路
 
 ```text
 Candidate / Research Snapshot
-        ↓
-Baseline Decision
-        ↓
-AI Shadow Reviewer
-        ↓
-Review / Evidence / Labels
-        ↓
-Research Record
+→ Baseline Decision
+→ AI Shadow Reviewer
+→ Review / Evidence / Labels
+→ Research Record
 ```
 
-The reviewer can produce a single research verdict such as:
+Reviewer 可以输出 `PASS / WOULD_BLOCK / ABSTAIN`，并记录 reason、confidence、reviewerId、promptVersion、runId。
 
-- PASS;
-- WOULD_BLOCK;
-- ABSTAIN.
+## 3. AI 没有 Execution Authority
 
-It can also record:
+不能直接 submit order、设置 leverage、调整 position size、绕过 deterministic risk、自动反手或清除 `RECOVERY_REQUIRED`。
 
-- reason;
-- confidence;
-- reviewer identity;
-- prompt version;
-- run identity.
+## 4. Historical Replay 的正确用途
 
-## No Execution Authority
+主要用于找 Prompt 漏洞、字段遗漏、重复 error pattern、标签问题和 evidence boundary，**不单独证明 prospective alpha**。
 
-The AI reviewer does not directly:
+## 5. 已知限制：模型可能“记得历史答案”
 
-- submit orders;
-- set leverage;
-- size positions;
-- bypass risk;
-- reverse positions;
-- clear recovery state.
+严格 T0 只能限制输入，不能删除模型权重里的历史知识。因此要明确披露，并把真正前瞻证据留给 prospective sampling。
 
-## Historical Replay Role
+## 6. Reviewer Stability
 
-Historical replay is primarily for:
-
-- finding prompt weaknesses;
-- finding missing fields;
-- discovering error patterns;
-- testing label definitions;
-- testing evidence boundaries.
-
-It is **not** treated as proof of prospective alpha.
-
-## Known Limitation: Model Memory
-
-Strict T0 input filtering cannot remove information already embedded in model weights from famous historical events.
-
-Therefore historical replay has a known memory/hindsight limitation.
-
-The correct response is:
-
-- disclose it;
-- optionally run memory-sensitivity tests;
-- avoid treating replay performance as prospective proof.
-
-## Reviewer Stability
-
-Reviewer stability remains a real research question.
-
-Useful metadata includes:
+至少记录：
 
 ```text
 reviewerId
@@ -88,26 +43,13 @@ promptVersion
 runId
 ```
 
-Possible later stability analysis:
+后续才有资格分析重复运行、模型/Prompt 版本变化、disagreement 与 flip rate。
 
-- repeated runs;
-- model changes;
-- prompt changes;
-- flip rate;
-- disagreement analysis.
+## 7. 外部信号的定位
 
-## External Signals
+Prediction Market、新闻、事件搜索可以提供 Evidence、Catalyst Confirmation、Research Context 和 Candidate Generation，但不会自动变成可执行 PerpIntent。
 
-Prediction markets, news, event-search systems, or alternative data may contribute:
-
-- evidence;
-- catalyst confirmation;
-- research context;
-- candidate generation.
-
-They do not automatically become executable perpetual intent.
-
-## Required Semantic Bridge
+## 8. 必须保留的语义桥
 
 ```text
 External Evidence
@@ -118,30 +60,10 @@ External Evidence
 → Execution
 ```
 
-`Trading Thesis → PerpIntent` remains an explicit business decision.
+## 9. 未来什么时候可以升级权限
 
-## Future Authority
+可能从 Shadow only 升级到 bounded candidate gating，但必须先有冻结规则后的 prospective evidence。deterministic Risk 仍不可绕过。
 
-A possible future progression is:
+## 10. 延期研究
 
-```text
-Shadow only
-→ bounded candidate gating
-```
-
-Only after prospective evidence exists.
-
-Deterministic risk remains downstream and non-bypassable.
-
-## Deferred Research Questions
-
-- memory-sensitivity A/B;
-- first-party source authentication;
-- reviewer attribution;
-- reviewer stability;
-- false-block analysis;
-- evidence-availability bias;
-- prospective paper validation;
-- more complex multi-source research.
-
-These are research questions, not current execution features.
+memory-sensitivity A/B、first-party source authentication、reviewer stability、false-block、evidence bias、prospective validation、multi-source research。
