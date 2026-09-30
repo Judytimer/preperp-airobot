@@ -1,6 +1,6 @@
 # Perp AI Trading Bot
 
-A TypeScript + Node.js perpetual futures trading bot for **paper trading, Binance Futures Testnet, execution reliability research, and AI-assisted strategy evaluation**.
+一个基于 TypeScript + Node.js 的永续合约交易工程项目，覆盖 **paper trading、Binance Futures Testnet、执行可靠性研究与 AI 辅助策略评估**。
 
 这个项目不是一个“只会跑策略 Demo”的量化机器人。
 
@@ -21,7 +21,7 @@ A TypeScript + Node.js perpetual futures trading bot for **paper trading, Binanc
 
 ---
 
-## Architecture
+## 架构
 
 ```text
 Market
@@ -62,9 +62,9 @@ Research Record
 
 ---
 
-## Engineering Highlights
+## 工程亮点
 
-### 1. Async Order Lifecycle
+### 1. 异步订单生命周期
 
 订单不是 `submit()` 成功就等于成交。
 
@@ -96,7 +96,7 @@ REST 请求成功不会被直接当成 ACK，Fill 和 CancelAck 只通过 execut
 
 ---
 
-### 2. Projected Position
+### 2. Projected Position（预计仓位）
 
 真实交易中，订单提交以后到 Fill 到达之前存在时间窗口。
 
@@ -116,7 +116,7 @@ Partial Fill 后只计算剩余未成交数量，不会重复计算整张原始�
 
 ---
 
-### 3. Partial Fill & Idempotency
+### 3. 部分成交与幂等
 
 系统显式处理：
 
@@ -131,7 +131,7 @@ Partial Fill 后只计算剩余未成交数量，不会重复计算整张原始�
 
 ---
 
-### 4. Isolated Margin & Liquidation Model
+### 4. 逐仓保证金与强平模型
 
 行情区分：
 
@@ -161,7 +161,7 @@ Position
 
 ---
 
-### 5. Checkpoint & Fail-Closed Recovery
+### 5. Checkpoint 与 Fail-Closed Recovery
 
 Core 将以下状态原子写入：
 
@@ -197,7 +197,7 @@ RECOVERY_REQUIRED
 
 ---
 
-### 6. Reconciliation
+### 6. Reconciliation（对账）
 
 恢复时，本地状态不能直接假设自己是正确的。
 
@@ -322,9 +322,9 @@ FORMAL
 
 ---
 
-## Quick Start
+## 快速开始
 
-### Environment
+### 环境
 
 ```text
 Node.js 22+
@@ -369,7 +369,7 @@ Market Tick
 
 ---
 
-## Tests
+## 测试
 
 ```bash
 npm test
@@ -446,9 +446,9 @@ npm run smoke:closure
 
 ---
 
-## Strategy
+## 策略
 
-### Execution Baseline
+### 执行基线
 
 项目保留简单 Moving Average Strategy 作为：
 
@@ -472,7 +472,7 @@ Reconciliation
 
 ---
 
-## AI Strategy Research
+## AI 策略研究
 
 项目还包含一个实验性：
 
@@ -507,7 +507,7 @@ npm run replay
 
 ---
 
-## Repository Structure
+## 仓库结构
 
 ```text
 src/
@@ -542,27 +542,19 @@ src/
 
 ---
 
-## Engineering Notes
+## 设计与实验文档
 
-完整设计过程和实验记录放在 `docs/`：
+README 只描述**当前系统形态**。完整设计依据、故障案例、AI 研究方法和后续路线统一从：
 
-- Partial Fill experiments
-- Isolated Margin
-- Checkpoint & Recovery
-- Binance Testnet
-- Prediction Overlay
-- Historical Replay
-- Recovery Evidence
+- [docs/README.md](docs/README.md) — 文档阅读地图
 
-README 展示当前系统最终形态。
+进入。
 
-`docs/` 保留：
-
-> 为什么这么设计、踩过什么坑、哪些假设被推翻，以及后续如何继续演进。
+文档按“当前稳定判断 → 真实故障证据 → AI 研究 → 延期设计 → 历史归档”分层，避免把早期实验结论和当前实现混在一起。
 
 ---
 
-## Current Boundary
+## 当前边界
 
 这个项目目前定位为：
 
