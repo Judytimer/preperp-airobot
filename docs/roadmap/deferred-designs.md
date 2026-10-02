@@ -64,8 +64,11 @@ authenticated venue evidence
 
 ## E. 策略与 AI 验证
 
-更多 FORMAL Case 只接受 archived input + measurable outcome。  
-Prospective sampling 必须在规则 freeze 后运行。  
+Strategy Lab 的 Formal Candidate admission 已冻结为 1-minute closed candle protocol v1.0.0；PENGU 的逐笔 / 1m 差异归类为 `MICROSTRUCTURE_SENSITIVE` 方法发现，不通过修改 Strategy 消除。
+
+当前主线切换为 freeze 后的 prospective sampling。更多历史案例只在能验证**尚未解决的方法问题**时重新打开；PENGU 缺少完整归档 raw artifact，因此不计作 FORMAL sample，这一点不阻塞阶段收尾。
+
+更多 FORMAL Case 仍只接受 archived input + measurable outcome。  
 MFE / MAE 只有在 final outcome 隐藏路径风险时才加。
 
 ## F. AI 研究
