@@ -14,6 +14,8 @@
     "testnet": "node --experimental-strip-types src/testnet-index.ts",
     "acquire:formal-case-1": "bash scripts/acquire-formal-case-1.sh",
     "overlay": "node --experimental-strip-types src/overlay-index.ts",
+    "manifest:check": "node --experimental-strip-types src/overlay/prospective-manifest.ts",
+    "strategy-lab:replay": "node --env-file-if-exists=.env --experimental-strip-types src/overlay/prospective-runner.ts",
     "replay": "node --experimental-strip-types src/replay-index.ts",
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },

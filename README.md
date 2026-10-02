@@ -515,6 +515,10 @@ Strategy Lab 的正式 Candidate admission 已冻结为 `v1.0.0`：使用 **1 �
 
 Historical Replay 是一个**有限的诊断阶段**，不是永久运行的研究主线。当前协议冻结后，主线转向 **Prospective Sampling（前瞻采样）**：只有未来样本暴露新的方法问题、数据泄漏或不可复现行为时，才重新打开历史研究，而不会为了增加样本数量持续寻找历史案例。
 
+Prospective v1 只接受 listing 前人工登记的 manifest；当前不实现自动市场扫描或自动 Meme 分类。`npm run manifest:check -- path/to/candidate.json` 只做本地 admission，输出 `DATA_READY / DATA_BLOCKED / INELIGIBLE`，不会抓行情、调用 Strategy 或触发交易。`DATA_READY` 仅表示对象与来源 locator 已完整冻结，当前总体状态仍为 `WAITING_FOR_QUALIFIED_MARKET`。详见 [Strategy Lab v1 Prospective Manifest](docs/research/prospective-manifest-v1.md)。
+
+归档真实 raw artifacts 后，`npm run strategy-lab:replay -- candidate.json observation.json reports/prospective` 执行最小正式链路并原子保存报告。Execution assumption `v1.0.0` 固定为：主结果双向不利 50 bps、0/100 bps 敏感性、零 fee、全量成交限制。`NO_CANDIDATE` 不触发 Risk/Paper/Shadow；Candidate 才运行原 Risk 与 Paper，Laya 不可用时明确记录失败且不阻塞 Paper。固定 bps 是压力测试，不代表真实盘口可成交价。
+
 ---
 
 ## 仓库结构

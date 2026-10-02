@@ -51,6 +51,8 @@ export class MemePredictionOverlayBot {
   private readonly shadowRunner: ShadowRunner | undefined;
   private readonly pendingOrders = new Map<string, PendingOverlayOrder>();
   private readonly executionRecords: OverlayPaperExecutionRecord[] = [];
+  private readonly paperEvents: ExecutionEvent[] = [];
+  private readonly positionRecords: PredictionPosition[] = [];
   private readonly slippageBps: number;
   private nextClientOrderId = 1;
   private positionBook: PredictionPositionBook | null = null;
@@ -139,6 +141,16 @@ export class MemePredictionOverlayBot {
     return structuredClone(this.executionRecords);
   }
 
+  /** Read-only audit projection; it does not participate in order handling. */
+  getPaperEvents(): readonly ExecutionEvent[] {
+    return structuredClone(this.paperEvents);
+  }
+
+  /** Read-only post-fill position history for prospective reports. */
+  getPositionRecords(): readonly PredictionPosition[] {
+    return structuredClone(this.positionRecords);
+  }
+
   private getProjectedShares(): number {
     let shares = this.positionBook!.get().shares;
     for (const { order } of this.pendingOrders.values()) {
@@ -148,6 +160,7 @@ export class MemePredictionOverlayBot {
   }
 
   private onExecutionEvent(event: ExecutionEvent): void {
+    this.paperEvents.push(structuredClone(event));
     if (event.type === "ORDER_ACK") {
       this.logger(formatOverlayAck(event.ack));
       return;
@@ -171,6 +184,7 @@ export class MemePredictionOverlayBot {
     this.logger(formatOverlayExecution(executionRecord));
     this.pendingOrders.delete(event.fill.clientOrderId);
     const position = this.positionBook!.applyFill(event.fill);
+    this.positionRecords.push(structuredClone(position));
     this.logger(formatOverlayPosition(position));
   }
 }
