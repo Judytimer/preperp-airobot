@@ -138,6 +138,14 @@ export function latestKnownYesAtOrBefore(
   return latest;
 }
 
+function isOneMinuteCandleDuration(openTs: number, closeTs: number): boolean {
+  const duration = closeTs - openTs;
+  return (
+    duration === FORMAL_STRATEGY_LAB_CADENCE_MS - 1 ||
+    duration === FORMAL_STRATEGY_LAB_CADENCE_MS
+  );
+}
+
 function validateInput(input: FormalOneMinuteInput): void {
   if (!Number.isFinite(input.listingAt)) throw new Error("listingAt must be finite");
   if (!Number.isFinite(input.totalSupply) || input.totalSupply <= 0) throw new Error("totalSupply must be positive");
@@ -156,7 +164,7 @@ function validateInput(input: FormalOneMinuteInput): void {
       candle.openTs <= previousOpen ||
       candle.closeTs <= previousClose ||
       candle.closeTs <= candle.openTs ||
-      candle.closeTs - candle.openTs > FORMAL_STRATEGY_LAB_CADENCE_MS
+      !isOneMinuteCandleDuration(candle.openTs, candle.closeTs)
     ) {
       throw new Error("formal replay candle is invalid");
     }
