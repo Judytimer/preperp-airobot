@@ -1,7 +1,9 @@
 # Strategy Lab v1 Prospective Manifest
 
 日期：2026-10-02
-状态：**FROZEN / WAITING_FOR_QUALIFIED_MARKET**
+状态：**FROZEN / SUPERSEDED BEFORE FIRST FORMAL SAMPLE**
+
+本协议没有产生正式 prospective observation。当前入口已切换到 [v2.1](prospective-manifest-v2.md)；v1 文档与 schema 仅保留用于审计，禁止回写。本页后续 CLI 示例是历史记录，同名 npm scripts 现在只接受 v2.1。
 
 ## 1. 目的
 

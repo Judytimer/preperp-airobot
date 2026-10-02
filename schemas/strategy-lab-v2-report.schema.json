@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Judytimer/preperp-airobot/schemas/strategy-lab-v2-report.schema.json",
+  "title": "Strategy Lab v2.1 Prospective Sampling Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "mode", "status", "observationId", "manifestId", "recordedAt",
+    "inputDigest", "repositoryCommit", "market", "token", "sources", "rawArtifacts",
+    "protocol", "formal", "riskDecision", "paperScenarios", "shadowRecord", "outcome", "blockers"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "2.1.0" },
+    "mode": { "const": "PROSPECTIVE_PAPER_SAMPLING" },
+    "status": { "enum": ["OBSERVED", "DATA_BLOCKED"] },
+    "observationId": { "type": "string", "minLength": 1 },
+    "manifestId": { "type": "string", "minLength": 1 },
+    "recordedAt": { "type": "number", "minimum": 0 },
+    "inputDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "repositoryCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "market": { "type": "object" },
+    "token": { "type": "object" },
+    "sources": { "type": "object" },
+    "rawArtifacts": { "type": "array" },
+    "protocol": {
+      "type": "object",
+      "required": ["formalOneMinuteVersion", "strategyParameters", "riskParameters", "executionAssumptionVersion", "primarySlippageBps", "sensitivitySlippageBps", "feeModel", "fillSemantics"],
+      "properties": {
+        "formalOneMinuteVersion": { "const": "2.1.0" },
+        "strategyParameters": { "type": "object" },
+        "riskParameters": { "type": "object" },
+        "executionAssumptionVersion": { "const": "1.0.0" },
+        "primarySlippageBps": { "const": 50 },
+        "sensitivitySlippageBps": {
+          "type": "array",
+          "prefixItems": [{ "const": 0 }, { "const": 100 }],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "feeModel": { "const": "ZERO" },
+        "fillSemantics": { "const": "FULL_FILL_LIMITATION" }
+      }
+    },
+    "formal": { "type": ["object", "null"] },
+    "riskDecision": { "type": ["object", "null"] },
+    "paperScenarios": { "type": "array" },
+    "shadowRecord": { "type": ["object", "null"] },
+    "outcome": {
+      "type": "object",
+      "required": ["measurementAt", "rule", "rulesUrl", "status"],
+      "properties": {
+        "measurementAt": { "type": "number", "minimum": 0 },
+        "rule": { "type": "string", "minLength": 1 },
+        "rulesUrl": { "type": "string", "pattern": "^https://" },
+        "status": { "enum": ["WAITING_FOR_FROZEN_TIME", "FROZEN_TIME_REACHED_AWAITING_OUTCOME"] }
+      }
+    },
+    "blockers": { "type": "array", "items": { "type": "string" } }
+  }
+}

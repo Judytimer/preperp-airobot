@@ -45,6 +45,7 @@
 - [验证方法：Historical Replay / FORMAL / Prospective](research/validation-methodology.md)
 - [Strategy Lab 收尾：Formal 1m Protocol × PENGU](research/strategy-lab-closeout.md)
 - [Strategy Lab v1 Prospective Manifest](research/prospective-manifest-v1.md)
+- [Strategy Lab v2.1 Prospective Manifest（当前）](research/prospective-manifest-v2.md)
 - [Prediction Market Overlay 实验](research/prediction-overlay.md)
 - [FORMAL Case #1：候选筛选](research/formal-case-1-candidate-screen.md)
 - [FORMAL Case #1：原始证据获取记录](research/formal-case-1-artifact-acquisition.md)

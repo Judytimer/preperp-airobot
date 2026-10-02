@@ -3,10 +3,13 @@ import test from "node:test";
 
 import {
   buildFormalOneMinuteSnapshots,
+  buildFormalOneMinuteV21Snapshots,
   FORMAL_STRATEGY_LAB_CADENCE_MS,
   FORMAL_STRATEGY_LAB_PROTOCOL_VERSION,
+  FORMAL_STRATEGY_LAB_V2_1_PROTOCOL_VERSION,
   latestKnownYesAtOrBefore,
   runFormalOneMinuteReplay,
+  runFormalOneMinuteV21Replay,
   type FormalOneMinuteInput
 } from "../src/overlay/strategy-lab.ts";
 
@@ -21,6 +24,23 @@ test("formal protocol uses first complete post-listing candle and last-known YES
   assert.ok(snapshots.every((snapshot) => snapshot.prediction.yesPriceObservedAt! <= snapshot.ts));
   assert.equal(snapshots[1].prediction.yesPrice, 0.4);
   assert.equal(snapshots[0].meme.fdv, 110_000);
+});
+
+test("v2.1 uses the first complete candle after archived first discovery", () => {
+  const v1 = input({ listingAt: 0, closes: [100, 110, 151] });
+  const { listingAt: _listingAt, ...rest } = v1;
+  const v21Input = { ...rest, firstDiscoveredAt: 60_001 };
+  const snapshots = buildFormalOneMinuteV21Snapshots(v21Input);
+  const result = runFormalOneMinuteV21Replay(
+    v21Input,
+    { spotRiseTriggerPct: 0.5, exitYesPrice: 0.7 }
+  );
+
+  assert.equal(FORMAL_STRATEGY_LAB_V2_1_PROTOCOL_VERSION, "2.1.0");
+  assert.equal(snapshots[0].meme.spotPrice, 151);
+  assert.equal(result.protocolVersion, "2.1.0");
+  assert.equal(result.status, "NO_CANDIDATE");
+  assert.equal(FORMAL_STRATEGY_LAB_PROTOCOL_VERSION, "1.0.0");
 });
 
 test("last-known YES lookup never interpolates or reads the future", () => {

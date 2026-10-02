@@ -17,10 +17,10 @@ import { DeterministicResearchRouter } from "./research.ts";
 import { OverlayRiskManager } from "./risk.ts";
 import { BoundedShadowRunner } from "./shadow-runner.ts";
 import {
-  buildFormalOneMinuteSnapshots,
-  runFormalOneMinuteReplay,
+  buildFormalOneMinuteV21Snapshots,
+  runFormalOneMinuteV21Replay,
   type ClosedSpotCandle,
-  type FormalOneMinuteReplayResult,
+  type FormalOneMinuteV21ReplayResult,
   type TimedYesPrice
 } from "./strategy-lab.ts";
 import type {
@@ -36,8 +36,8 @@ import type {
   TradeCandidate
 } from "./types.ts";
 
-export const PROSPECTIVE_OBSERVATION_SCHEMA_VERSION = "1.0.0";
-export const PROSPECTIVE_REPORT_SCHEMA_VERSION = "1.0.0";
+export const PROSPECTIVE_OBSERVATION_SCHEMA_VERSION = "2.1.0";
+export const PROSPECTIVE_REPORT_SCHEMA_VERSION = "2.1.0";
 
 export type RawArtifactKind = "BINANCE_SPOT_KLINES" | "POLYMARKET_LAST_TRADES";
 
@@ -96,7 +96,7 @@ export type ProspectiveSamplingReport = {
     readonly feeModel: "ZERO";
     readonly fillSemantics: "FULL_FILL_LIMITATION";
   };
-  readonly formal: FormalOneMinuteReplayResult | null;
+  readonly formal: FormalOneMinuteV21ReplayResult | null;
   readonly riskDecision: OverlayRiskDecision | null;
   readonly paperScenarios: readonly PaperScenarioRecord[];
   readonly shadowRecord: ShadowRecord | null;
@@ -179,6 +179,7 @@ export async function runProspectiveSamplingFiles(
     }
     let report: ProspectiveSamplingReport;
     try {
+      await verifyDiscoveryArtifact(manifest, manifestPath);
       await verifyArtifacts(observation, observationPath, manifest);
       validateObservationTimeline(observation, manifest, now());
       report = await executeObservation(
@@ -217,7 +218,7 @@ async function executeObservation(
     (candle) => candle.closeTs <= manifest.outcome.measurementAt
   );
   const input = {
-    listingAt: manifest.listing.listingAt,
+    firstDiscoveredAt: manifest.market.discovery.firstDiscoveredAt,
     symbol: manifest.token.symbol,
     totalSupply: manifest.supply.totalSupply,
     marketId: manifest.market.marketId,
@@ -230,7 +231,7 @@ async function executeObservation(
     spotRiseTriggerPct: manifest.protocol.spotRiseTriggerPct,
     exitYesPrice: manifest.protocol.exitYesPrice
   };
-  const formal = runFormalOneMinuteReplay(input, strategyConfig);
+  const formal = runFormalOneMinuteV21Replay(input, strategyConfig);
   const report = baseReport(manifest, observation, inputDigest, now(), "OBSERVED", []);
   if (formal.status === "NO_CANDIDATE") {
     return { ...report, formal };
@@ -239,7 +240,7 @@ async function executeObservation(
   const riskDecision = new OverlayRiskManager({
     maxRiskBudget: manifest.protocol.maxRiskBudget
   }).evaluate(formal.candidate.signal, 0);
-  const snapshots = buildFormalOneMinuteSnapshots(input).slice(0, formal.evaluatedSnapshots);
+  const snapshots = buildFormalOneMinuteV21Snapshots(input).slice(0, formal.evaluatedSnapshots);
   const shadowRecords: ShadowRecord[] = [];
   const shadowRunner = dependencies.shadowRunnerFactory?.((record) => shadowRecords.push(record)) ??
     createShadowRunner(observation.evidence ?? [], shadowRecords, dependencies.env ?? process.env);
@@ -272,7 +273,7 @@ async function executeObservation(
 
 async function runPaperScenario(
   manifest: ProspectiveManifest,
-  snapshots: ReturnType<typeof buildFormalOneMinuteSnapshots>,
+  snapshots: ReturnType<typeof buildFormalOneMinuteV21Snapshots>,
   slippageBps: number,
   role: PaperScenarioRecord["role"],
   shadowRunner?: ShadowRunner
@@ -498,6 +499,11 @@ function validateObservationTimeline(
   currentTime: number
 ): void {
   if (observation.retrievedAt > currentTime) throw new Error("observation retrievedAt is in the future");
+  if (manifest.registeredAt > currentTime) throw new Error("manifest registeredAt is in the future");
+  if (manifest.market.discovery.retrievedAt > currentTime) throw new Error("market discovery retrievedAt is in the future");
+  if (observation.retrievedAt < manifest.market.discovery.firstDiscoveredAt) {
+    throw new Error("observation retrievedAt is before first market discovery");
+  }
   if (observation.candles.some((candle) => candle.closeTs > observation.retrievedAt)) {
     throw new Error("spot candle is later than retrievedAt");
   }
@@ -519,6 +525,19 @@ function validateObservationTimeline(
   if (Math.max(...observation.yesPrices.map((point) => point.ts)) > yes.sourceTimestamp) {
     throw new Error("YES artifact source timestamp does not cover observations");
   }
+}
+
+async function verifyDiscoveryArtifact(
+  manifest: ProspectiveManifest,
+  manifestPath: string
+): Promise<void> {
+  const discovery = manifest.market.discovery;
+  const path = isAbsolute(discovery.rawResponsePath)
+    ? discovery.rawResponsePath
+    : resolve(dirname(resolve(manifestPath)), discovery.rawResponsePath);
+  const body = await readFile(path);
+  const actual = createHash("sha256").update(body).digest("hex");
+  if (actual !== discovery.sha256) throw new Error("POLYMARKET_GAMMA_DISCOVERY checksum mismatch");
 }
 
 async function verifyArtifacts(
@@ -644,7 +663,7 @@ function findCredentialFields(value: unknown, path = "$", found: string[] = []):
 }
 
 async function main(): Promise<void> {
-  const [manifestPath, observationPath, reportDirectory = "reports/prospective"] = process.argv.slice(2);
+  const [manifestPath, observationPath, reportDirectory = "reports/prospective-v2.1"] = process.argv.slice(2);
   if (manifestPath === undefined || observationPath === undefined) {
     console.error("usage: npm run strategy-lab:replay -- <manifest.json> <observation.json> [report-directory]");
     process.exitCode = 2;

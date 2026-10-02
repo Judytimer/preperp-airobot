@@ -108,27 +108,44 @@ test("checksum mismatch and candle gaps fail closed into a persisted DATA_BLOCKE
   assert.match(gapResult.report.blockers.join("\n"), /contiguous 1-minute/);
 });
 
+test("first-discovery raw response checksum mismatch fails closed", async () => {
+  const fixture = await createFixture([100, 151]);
+  const value = JSON.parse(await readFile(fixture.manifestPath, "utf8"));
+  value.market.discovery.sha256 = "0".repeat(64);
+  await writeFile(fixture.manifestPath, JSON.stringify(value), "utf8");
+  const result = await runProspectiveSamplingFiles(
+    fixture.manifestPath,
+    fixture.observationPath,
+    fixture.reportDirectory,
+    { now: () => 500_000, env: {} }
+  );
+  assert.equal(result.report.status, "DATA_BLOCKED");
+  assert.match(result.report.blockers.join("\n"), /POLYMARKET_GAMMA_DISCOVERY checksum mismatch/);
+});
+
 async function createFixture(closes: readonly number[]) {
   const directory = await mkdtemp(join(tmpdir(), "prospective-runner-"));
+  const rawDiscovery = "raw Polymarket Gamma discovery response";
   const rawSpot = "raw Binance response";
   const rawYes = "raw Polymarket response";
   await Promise.all([
+    writeFile(join(directory, "discovery.raw.json"), rawDiscovery, "utf8"),
     writeFile(join(directory, "spot.raw.json"), rawSpot, "utf8"),
     writeFile(join(directory, "yes.raw.json"), rawYes, "utf8")
   ]);
   const manifestPath = join(directory, "manifest.json");
   const observationPath = join(directory, "observation.json");
   const reportDirectory = join(directory, "reports");
-  await writeFile(manifestPath, JSON.stringify(manifest()), "utf8");
+  await writeFile(manifestPath, JSON.stringify(manifest(rawDiscovery)), "utf8");
   await writeFile(observationPath, JSON.stringify(observation(closes, rawSpot, rawYes)), "utf8");
   return { manifestPath, observationPath, reportDirectory };
 }
 
-function manifest() {
+function manifest(rawDiscovery: string) {
   return {
-    schemaVersion: "1.0.0",
+    schemaVersion: "2.1.0",
     manifestId: "PROSPECTIVE-RUNNER-TEST",
-    registeredAt: 500,
+    registeredAt: 60_000,
     repositoryCommit: "2fc1bb676b8108360a2404bb0d14350f2f231dd8",
     market: {
       marketId: "MARKET-1",
@@ -136,27 +153,39 @@ function manifest() {
       marketUrl: "https://polymarket.com/event/test",
       rulesUrl: "https://polymarket.com/event/test",
       createdAt: 400,
-      activeAtRegistration: true,
-      marketType: "FDV_AFTER_LAUNCH",
+      openedAt: 1_000,
+      rulesAvailableAtDiscovery: true,
+      marketType: "FUTURE_FDV_THRESHOLD",
       targetFdv: 500_000,
-      yesTokenId: "YES-1"
+      yesTokenId: "YES-1",
+      discovery: {
+        provider: "POLYMARKET_GAMMA",
+        firstDiscoveredAt: 60_000,
+        sourceUrl: "https://gamma-api.polymarket.com/markets?closed=false",
+        sourceTimestamp: 55_000,
+        retrievedAt: 60_000,
+        rawResponsePath: "discovery.raw.json",
+        sha256: digest(rawDiscovery)
+      }
     },
     token: {
       symbol: "TEST",
       identifier: "solana:TEST",
-      classification: "MEME",
+      classification: "CRYPTO_ASSET",
       classificationSourceUrl: "https://project.example/token"
     },
     listing: {
-      listingAt: 1_000,
+      listedAt: 100,
       binanceSymbol: "TESTUSDT",
-      announcementUrl: "https://www.binance.com/en/support/announcement/test"
+      listingSourceUrl: "https://www.binance.com/en/support/announcement/test"
     },
     supply: {
       totalSupply: 1_000,
-      observedAt: 450,
+      observedAt: 50_000,
       sourceUrl: "https://project.example/supply",
-      verificationMethod: "OFFICIAL_TOKENOMICS"
+      verificationMethod: "OFFICIAL_TOKENOMICS",
+      fixedThroughMeasurement: true,
+      fixedThroughMeasurementSourceUrl: "https://project.example/supply"
     },
     sources: {
       spot: {
@@ -170,7 +199,7 @@ function manifest() {
       }
     },
     protocol: {
-      formalOneMinuteVersion: "1.0.0",
+      formalOneMinuteVersion: "2.1.0",
       strategyImplementation: "MemePredictionOverlayStrategy",
       spotRiseTriggerPct: 0.5,
       exitYesPrice: 0.7,
@@ -187,7 +216,7 @@ function manifest() {
     outcome: {
       measurementAt: 1_000_000,
       rule: "Use the frozen market rule.",
-      rulesCapturedAt: 480,
+      rulesCapturedAt: 50_000,
       rulesUrl: "https://polymarket.com/event/test"
     }
   };
@@ -205,7 +234,7 @@ function observation(closes: readonly number[], rawSpot: string, rawYes: string)
     { ts: 210_000, yesPrice: 0.4 }
   ].filter((point) => point.ts <= candles.at(-1)!.closeTs);
   return {
-    schemaVersion: "1.0.0",
+    schemaVersion: "2.1.0",
     observationId: "SCAN-1",
     retrievedAt: 400_000,
     rawArtifacts: [

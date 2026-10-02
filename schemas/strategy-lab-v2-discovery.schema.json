@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Judytimer/preperp-airobot/schemas/strategy-lab-v2-discovery.schema.json",
+  "title": "Strategy Lab v2.1 Polymarket First Discovery Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "marketId", "question", "slug", "disposition", "reason", "registeredAt", "market", "discovery", "acquisitionClock"],
+  "properties": {
+    "schemaVersion": { "const": "2.1.0" },
+    "marketId": { "type": "string", "minLength": 1 },
+    "question": { "type": "string", "minLength": 1 },
+    "slug": { "type": ["string", "null"] },
+    "disposition": { "enum": ["POTENTIAL_FDV_REVIEW", "IGNORED_NON_FDV_TEXT", "DATA_BLOCKED"] },
+    "reason": { "type": "string", "minLength": 1 },
+    "registeredAt": { "$ref": "#/$defs/timestamp" },
+    "market": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createdAt", "openedAt", "updatedAt", "active", "closed", "acceptingOrders", "enableOrderBook", "endDate"],
+      "properties": {
+        "createdAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "openedAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "updatedAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "active": { "type": ["boolean", "null"] },
+        "closed": { "type": ["boolean", "null"] },
+        "acceptingOrders": { "type": ["boolean", "null"] },
+        "enableOrderBook": { "type": ["boolean", "null"] },
+        "endDate": { "$ref": "#/$defs/nullableTimestamp" }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "firstDiscoveredAt", "sourceUrl", "sourceTimestamp", "retrievedAt", "rawResponsePath", "sha256"],
+      "properties": {
+        "provider": { "const": "POLYMARKET_GAMMA" },
+        "firstDiscoveredAt": { "$ref": "#/$defs/timestamp" },
+        "sourceUrl": { "const": "https://gamma-api.polymarket.com/markets?closed=false&limit=100&order=createdAt&ascending=false" },
+        "sourceTimestamp": { "$ref": "#/$defs/nullableTimestamp" },
+        "retrievedAt": { "$ref": "#/$defs/timestamp" },
+        "rawResponsePath": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "acquisitionClock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "sourceDate", "localRequestStartedAt", "localResponseReceivedAt", "midpointOffsetMs"],
+      "properties": {
+        "basis": { "const": "POLYMARKET_HTTP_DATE" },
+        "sourceDate": { "$ref": "#/$defs/timestamp" },
+        "localRequestStartedAt": { "$ref": "#/$defs/timestamp" },
+        "localResponseReceivedAt": { "$ref": "#/$defs/timestamp" },
+        "midpointOffsetMs": { "type": "number" }
+      }
+    }
+  },
+  "$defs": {
+    "timestamp": { "type": "number", "minimum": 0 },
+    "nullableTimestamp": { "type": ["number", "null"], "minimum": 0 }
+  }
+}

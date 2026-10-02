@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-export const PROSPECTIVE_MANIFEST_SCHEMA_VERSION = "1.0.0";
+export const PROSPECTIVE_MANIFEST_SCHEMA_VERSION = "2.1.0";
 export const PROSPECTIVE_EXECUTION_ASSUMPTION_VERSION = "1.0.0";
 export const PROSPECTIVE_PRIMARY_SLIPPAGE_BPS = 50;
 export const PROSPECTIVE_SENSITIVITY_SLIPPAGE_BPS = [0, 100] as const;
@@ -28,10 +28,20 @@ export type ProspectiveManifest = {
     readonly marketUrl: string;
     readonly rulesUrl: string;
     readonly createdAt: number;
-    readonly activeAtRegistration: boolean;
+    readonly openedAt: number;
+    readonly rulesAvailableAtDiscovery: boolean;
     readonly marketType: string;
     readonly targetFdv: number;
     readonly yesTokenId: string;
+    readonly discovery: {
+      readonly provider: string;
+      readonly firstDiscoveredAt: number;
+      readonly sourceUrl: string;
+      readonly sourceTimestamp: number;
+      readonly retrievedAt: number;
+      readonly rawResponsePath: string;
+      readonly sha256: string;
+    };
   };
   readonly token: {
     readonly symbol: string;
@@ -40,15 +50,17 @@ export type ProspectiveManifest = {
     readonly classificationSourceUrl: string;
   };
   readonly listing: {
-    readonly listingAt: number;
+    readonly listedAt: number;
     readonly binanceSymbol: string;
-    readonly announcementUrl: string;
+    readonly listingSourceUrl: string;
   };
   readonly supply: {
     readonly totalSupply: number;
     readonly observedAt: number;
     readonly sourceUrl: string;
     readonly verificationMethod: string;
+    readonly fixedThroughMeasurement: boolean;
+    readonly fixedThroughMeasurementSourceUrl: string;
   };
   readonly sources: {
     readonly spot: {
@@ -100,21 +112,31 @@ const REQUIRED_FIELDS: readonly FieldRule[] = [
   httpsField("market.marketUrl"),
   httpsField("market.rulesUrl"),
   timestampField("market.createdAt"),
-  { path: "market.activeAtRegistration", valid: (value) => typeof value === "boolean", reason: "market.activeAtRegistration must be boolean" },
+  timestampField("market.openedAt"),
+  { path: "market.rulesAvailableAtDiscovery", valid: (value) => typeof value === "boolean", reason: "market.rulesAvailableAtDiscovery must be boolean" },
   stringField("market.marketType"),
   positiveField("market.targetFdv"),
   stringField("market.yesTokenId"),
+  stringField("market.discovery.provider"),
+  timestampField("market.discovery.firstDiscoveredAt"),
+  httpsField("market.discovery.sourceUrl"),
+  timestampField("market.discovery.sourceTimestamp"),
+  timestampField("market.discovery.retrievedAt"),
+  stringField("market.discovery.rawResponsePath"),
+  { path: "market.discovery.sha256", valid: (value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value), reason: "market.discovery.sha256 must be a lowercase SHA-256 digest" },
   stringField("token.symbol"),
   stringField("token.identifier"),
   stringField("token.classification"),
   httpsField("token.classificationSourceUrl"),
-  timestampField("listing.listingAt"),
+  timestampField("listing.listedAt"),
   { path: "listing.binanceSymbol", valid: (value) => typeof value === "string" && /^[A-Z0-9]+USDT$/.test(value), reason: "listing.binanceSymbol must be an uppercase USDT spot symbol" },
-  httpsField("listing.announcementUrl"),
+  httpsField("listing.listingSourceUrl"),
   positiveField("supply.totalSupply"),
   timestampField("supply.observedAt"),
   httpsField("supply.sourceUrl"),
   stringField("supply.verificationMethod"),
+  { path: "supply.fixedThroughMeasurement", valid: (value) => typeof value === "boolean", reason: "supply.fixedThroughMeasurement must be boolean" },
+  httpsField("supply.fixedThroughMeasurementSourceUrl"),
   stringField("sources.spot.provider"),
   stringField("sources.spot.interval"),
   httpsField("sources.spot.klinesUrl"),
@@ -193,14 +215,27 @@ export async function loadProspectiveManifest(path: string): Promise<Prospective
 
 function chronologicalContradictions(manifest: ProspectiveManifest): string[] {
   const reasons: string[] = [];
-  if (manifest.market.createdAt > manifest.registeredAt) {
-    reasons.push("market.createdAt cannot be after registeredAt");
+  const discovery = manifest.market.discovery;
+  if (manifest.market.createdAt > discovery.firstDiscoveredAt) {
+    reasons.push("market.createdAt cannot be after market.discovery.firstDiscoveredAt");
   }
-  if (manifest.supply.observedAt > manifest.registeredAt) {
-    reasons.push("supply.observedAt cannot be after registeredAt");
+  if (manifest.market.openedAt < manifest.market.createdAt) {
+    reasons.push("market.openedAt cannot be before market.createdAt");
   }
-  if (manifest.outcome.rulesCapturedAt > manifest.registeredAt) {
-    reasons.push("outcome.rulesCapturedAt cannot be after registeredAt");
+  if (discovery.sourceTimestamp > discovery.retrievedAt) {
+    reasons.push("market discovery sourceTimestamp cannot be after retrievedAt");
+  }
+  if (discovery.firstDiscoveredAt !== discovery.retrievedAt) {
+    reasons.push("market.discovery.firstDiscoveredAt must equal discovery retrievedAt");
+  }
+  if (manifest.registeredAt !== discovery.firstDiscoveredAt) {
+    reasons.push("registeredAt must equal market.discovery.firstDiscoveredAt");
+  }
+  if (manifest.supply.observedAt > discovery.firstDiscoveredAt) {
+    reasons.push("supply.observedAt cannot be after market.discovery.firstDiscoveredAt");
+  }
+  if (manifest.outcome.rulesCapturedAt > discovery.firstDiscoveredAt) {
+    reasons.push("outcome.rulesCapturedAt cannot be after market.discovery.firstDiscoveredAt");
   }
   return reasons;
 }
@@ -210,20 +245,30 @@ function eligibilityReasons(manifest: ProspectiveManifest): string[] {
   if (manifest.schemaVersion !== PROSPECTIVE_MANIFEST_SCHEMA_VERSION) {
     reasons.push("unsupported manifest schemaVersion");
   }
-  if (manifest.registeredAt >= manifest.listing.listingAt) {
-    reasons.push("manifest was not registered before listingAt");
+  const firstDiscoveredAt = manifest.market.discovery.firstDiscoveredAt;
+  if (manifest.listing.listedAt >= firstDiscoveredAt) {
+    reasons.push("asset was not already Binance-listed at first discovery");
   }
-  if (!manifest.market.activeAtRegistration) {
-    reasons.push("market was not active at registration");
+  if (!manifest.market.rulesAvailableAtDiscovery) {
+    reasons.push("market rules were not available at first discovery");
   }
-  if (manifest.market.marketType !== "FDV_AFTER_LAUNCH") {
-    reasons.push("marketType is not FDV_AFTER_LAUNCH");
+  if (manifest.market.marketType !== "FUTURE_FDV_THRESHOLD") {
+    reasons.push("marketType is not FUTURE_FDV_THRESHOLD");
   }
-  if (manifest.token.classification !== "MEME") {
-    reasons.push("token classification is not MEME");
+  if (manifest.token.classification !== "CRYPTO_ASSET") {
+    reasons.push("token classification is not CRYPTO_ASSET");
   }
   if (!isAllowedSupplyMethod(manifest.supply.verificationMethod)) {
     reasons.push("supply verification method is not allowed");
+  }
+  if (!manifest.supply.fixedThroughMeasurement) {
+    reasons.push("totalSupply is not proven fixed through outcome measurement");
+  }
+  if (manifest.market.discovery.provider !== "POLYMARKET_GAMMA") {
+    reasons.push("market discovery provider is not POLYMARKET_GAMMA");
+  }
+  if (!isPolymarketGammaUrl(manifest.market.discovery.sourceUrl)) {
+    reasons.push("market discovery source URL is not the public Polymarket Gamma API");
   }
   if (manifest.sources.spot.provider !== "BINANCE_SPOT") {
     reasons.push("spot provider is not BINANCE_SPOT");
@@ -243,8 +288,8 @@ function eligibilityReasons(manifest: ProspectiveManifest): string[] {
   if (!isPolymarketUrl(manifest.market.marketUrl) || !isPolymarketUrl(manifest.market.rulesUrl)) {
     reasons.push("market and rules URLs must be Polymarket URLs");
   }
-  if (manifest.protocol.formalOneMinuteVersion !== "1.0.0") {
-    reasons.push("Formal 1m protocol version is not 1.0.0");
+  if (manifest.protocol.formalOneMinuteVersion !== "2.1.0") {
+    reasons.push("Formal 1m protocol version is not 2.1.0");
   }
   if (
     manifest.protocol.strategyImplementation !== "MemePredictionOverlayStrategy" ||
@@ -271,11 +316,8 @@ function eligibilityReasons(manifest: ProspectiveManifest): string[] {
   ) {
     reasons.push("Execution assumptions differ from frozen prospective profile");
   }
-  if (manifest.outcome.measurementAt <= manifest.listing.listingAt) {
-    reasons.push("outcome measurementAt must be after listingAt");
-  }
-  if (manifest.outcome.rulesCapturedAt >= manifest.listing.listingAt) {
-    reasons.push("outcome rule was not captured before listingAt");
+  if (manifest.outcome.measurementAt <= firstDiscoveredAt) {
+    reasons.push("outcome measurementAt must be after market.discovery.firstDiscoveredAt");
   }
   return reasons;
 }
@@ -299,6 +341,15 @@ function isPolymarketUrl(value: string): boolean {
     const url = new URL(value);
     return url.protocol === "https:" &&
       (url.hostname === "polymarket.com" || url.hostname.endsWith(".polymarket.com"));
+  } catch {
+    return false;
+  }
+}
+
+function isPolymarketGammaUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "gamma-api.polymarket.com";
   } catch {
     return false;
   }

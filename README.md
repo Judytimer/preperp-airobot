@@ -515,9 +515,11 @@ Strategy Lab 的正式 Candidate admission 已冻结为 `v1.0.0`：使用 **1 �
 
 Historical Replay 是一个**有限的诊断阶段**，不是永久运行的研究主线。当前协议冻结后，主线转向 **Prospective Sampling（前瞻采样）**：只有未来样本暴露新的方法问题、数据泄漏或不可复现行为时，才重新打开历史研究，而不会为了增加样本数量持续寻找历史案例。
 
-Prospective v1 只接受 listing 前人工登记的 manifest；当前不实现自动市场扫描或自动 Meme 分类。`npm run manifest:check -- path/to/candidate.json` 只做本地 admission，输出 `DATA_READY / DATA_BLOCKED / INELIGIBLE`，不会抓行情、调用 Strategy 或触发交易。`DATA_READY` 仅表示对象与来源 locator 已完整冻结，当前总体状态仍为 `WAITING_FOR_QUALIFIED_MARKET`。详见 [Strategy Lab v1 Prospective Manifest](docs/research/prospective-manifest-v1.md)。
+Prospective v1 没有产生正式样本，现已冻结并由 v2.1 取代。Prospective v2.1 允许已经在 Binance Spot 上线的加密资产；它以归档的 Polymarket Gamma 首次公开发现时间作为不可回填的边界，baseline 固定为该时间之后第一根完整 1m candle。Polymarket 市场开放时间只保留为证据字段。`npm run manifest:check -- path/to/candidate-v2.1.json` 只做 admission，输出 `DATA_READY / DATA_BLOCKED / INELIGIBLE`，不会抓行情、调用 Strategy 或触发交易。详见 [Strategy Lab v2.1 Prospective Manifest](docs/research/prospective-manifest-v2.md)。
 
-归档真实 raw artifacts 后，`npm run strategy-lab:replay -- candidate.json observation.json reports/prospective` 执行最小正式链路并原子保存报告。Execution assumption `v1.0.0` 固定为：主结果双向不利 50 bps、0/100 bps 敏感性、零 fee、全量成交限制。`NO_CANDIDATE` 不触发 Risk/Paper/Shadow；Candidate 才运行原 Risk 与 Paper，Laya 不可用时明确记录失败且不阻塞 Paper。固定 bps 是压力测试，不代表真实盘口可成交价。
+`npm run prospective:discover` 执行一次最小只读发现：查询公开且免认证的 Polymarket Gamma 最新 100 个未关闭市场，归档完整原始响应，并为每个 marketId 只写一次不可覆盖的 first-discovery record。明确出现 `FDV` 或 `fully diluted valuation/value` 的市场只标记为 `POTENTIAL_FDV_REVIEW`；它不会自动填 supply、改变 Strategy 或进入 Risk/Paper/Shadow。默认证据目录是被 Git 忽略的 `work/prospective-v2.1/discovery`。
+
+归档首次发现、Binance Kline 与 Polymarket last-trade 的真实 raw artifacts 后，`npm run strategy-lab:replay -- candidate-v2.1.json observation-v2.1.json reports/prospective-v2.1` 执行 Formal v2.1 链路并原子保存报告。Execution assumption 仍为独立的 `v1.0.0`：主结果双向不利 50 bps、0/100 bps 敏感性、零 fee、全量成交限制。`NO_CANDIDATE` 不触发 Risk/Paper/Shadow；Candidate 才运行原 Risk 与 Paper，Laya 不可用时明确记录失败且不阻塞 Paper。固定 bps 是压力测试，不代表真实盘口可成交价。
 
 ---
 

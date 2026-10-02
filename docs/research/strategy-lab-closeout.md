@@ -109,6 +109,8 @@ Frozen protocol
 
 ## 6. Prospective sampling 的最小记录
 
+补充：本收尾文档中的 v1 listing baseline 保留为历史方法记录。v1 未产生正式 prospective sample；短暂设计的 v2.0 也未产生样本，已在投入采样前由 `v2.1.0` 取代。当前 batch 允许已经在 Binance Spot 上线的加密资产，以归档的 Polymarket Gamma `firstDiscoveredAt` 后第一根完整 1m candle 为 baseline；`market.openedAt` 只作为证据字段。详见 [v2.1 manifest](prospective-manifest-v2.md)。
+
 每个未来观察点至少保存：
 
 ```text

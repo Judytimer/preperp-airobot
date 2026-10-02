@@ -2,6 +2,7 @@ import { MemePredictionOverlayStrategy, type OverlayStrategyConfig } from "./str
 import type { ResearchSnapshot, TradeCandidate } from "./types.ts";
 
 export const FORMAL_STRATEGY_LAB_PROTOCOL_VERSION = "1.0.0";
+export const FORMAL_STRATEGY_LAB_V2_1_PROTOCOL_VERSION = "2.1.0";
 export const FORMAL_STRATEGY_LAB_CADENCE_MS = 60_000;
 
 export type ClosedSpotCandle = {
@@ -26,6 +27,11 @@ export type FormalOneMinuteInput = {
   readonly yesPrices: readonly TimedYesPrice[];
 };
 
+export type FormalOneMinuteV21Input = Omit<FormalOneMinuteInput, "listingAt"> & {
+  /** Objective v2.1 boundary: timestamp of the archived first public discovery. */
+  readonly firstDiscoveredAt: number;
+};
+
 export type FormalOneMinuteReplayResult =
   | {
       readonly status: "CANDIDATE";
@@ -37,6 +43,22 @@ export type FormalOneMinuteReplayResult =
   | {
       readonly status: "NO_CANDIDATE";
       readonly protocolVersion: typeof FORMAL_STRATEGY_LAB_PROTOCOL_VERSION;
+      readonly baselineTs: number;
+      readonly evaluatedSnapshots: number;
+      readonly reason: "STRATEGY_NEVER_EMITTED_BUY_YES";
+    };
+
+export type FormalOneMinuteV21ReplayResult =
+  | {
+      readonly status: "CANDIDATE";
+      readonly protocolVersion: typeof FORMAL_STRATEGY_LAB_V2_1_PROTOCOL_VERSION;
+      readonly baselineTs: number;
+      readonly evaluatedSnapshots: number;
+      readonly candidate: TradeCandidate;
+    }
+  | {
+      readonly status: "NO_CANDIDATE";
+      readonly protocolVersion: typeof FORMAL_STRATEGY_LAB_V2_1_PROTOCOL_VERSION;
       readonly baselineTs: number;
       readonly evaluatedSnapshots: number;
       readonly reason: "STRATEGY_NEVER_EMITTED_BUY_YES";
@@ -91,11 +113,44 @@ export function buildFormalOneMinuteSnapshots(input: FormalOneMinuteInput): read
   });
 }
 
+/**
+ * v2.1 changes only the objective baseline boundary. Strategy inputs and semantics
+ * remain identical to v1 after the first complete candle at/after firstDiscoveredAt.
+ */
+export function buildFormalOneMinuteV21Snapshots(
+  input: FormalOneMinuteV21Input
+): readonly ResearchSnapshot[] {
+  const { firstDiscoveredAt, ...rest } = input;
+  return buildFormalOneMinuteSnapshots({ ...rest, listingAt: firstDiscoveredAt });
+}
+
 export function runFormalOneMinuteReplay(
   input: FormalOneMinuteInput,
   config: OverlayStrategyConfig
 ): FormalOneMinuteReplayResult {
-  const snapshots = buildFormalOneMinuteSnapshots(input);
+  return runReplaySnapshots(
+    buildFormalOneMinuteSnapshots(input),
+    config,
+    FORMAL_STRATEGY_LAB_PROTOCOL_VERSION
+  ) as FormalOneMinuteReplayResult;
+}
+
+export function runFormalOneMinuteV21Replay(
+  input: FormalOneMinuteV21Input,
+  config: OverlayStrategyConfig
+): FormalOneMinuteV21ReplayResult {
+  return runReplaySnapshots(
+    buildFormalOneMinuteV21Snapshots(input),
+    config,
+    FORMAL_STRATEGY_LAB_V2_1_PROTOCOL_VERSION
+  ) as FormalOneMinuteV21ReplayResult;
+}
+
+function runReplaySnapshots(
+  snapshots: readonly ResearchSnapshot[],
+  config: OverlayStrategyConfig,
+  protocolVersion: string
+): FormalOneMinuteReplayResult | FormalOneMinuteV21ReplayResult {
   if (snapshots.length === 0) throw new Error("formal replay requires at least one snapshot");
 
   const strategy = new MemePredictionOverlayStrategy(config);
@@ -105,7 +160,7 @@ export function runFormalOneMinuteReplay(
     if (signal.action === "BUY_YES") {
       return {
         status: "CANDIDATE",
-        protocolVersion: FORMAL_STRATEGY_LAB_PROTOCOL_VERSION,
+        protocolVersion,
         baselineTs: snapshots[0].ts,
         evaluatedSnapshots: index + 1,
         candidate: {
@@ -120,7 +175,7 @@ export function runFormalOneMinuteReplay(
 
   return {
     status: "NO_CANDIDATE",
-    protocolVersion: FORMAL_STRATEGY_LAB_PROTOCOL_VERSION,
+    protocolVersion,
     baselineTs: snapshots[0].ts,
     evaluatedSnapshots: snapshots.length,
     reason: "STRATEGY_NEVER_EMITTED_BUY_YES"
