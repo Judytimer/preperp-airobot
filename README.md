@@ -435,6 +435,8 @@ Open Orders Snapshot
 
 联合收官冒烟在同一次运行中并行验收 authenticated Binance execution 与真实 Laya Shadow：
 
+可以复制 `.env.example` 为本地 `.env` 后填入配置；`.env` 已被 Git 忽略。若不创建 `.env`，也可以继续使用当前 PowerShell 会话的环境变量：
+
 ```powershell
 $env:BINANCE_TESTNET_API_KEY = "..."
 $env:BINANCE_TESTNET_API_SECRET = "..."
@@ -443,6 +445,8 @@ $env:LAYA_BASE_URL = "http://127.0.0.1:8000"
 $env:LAYA_API_KEY = "..."
 npm run smoke:closure
 ```
+
+启动时，closure 入口会读取 Binance Futures Testnet 的公共 server time，用请求中点估算偏移，并且只在当前 Node 进程内兼容签名时间；它不会修改 Windows 系统时间，也不会放宽 `recvWindow`。时间接口失败、往返时间异常或偏移超出安全边界时均 fail closed，不开始 authenticated execution。
 
 该入口在任何 market tick 进入 `PerpBot` 前要求本地/venue reconciliation 一致、双方 Position 均为 FLAT、venue 无 open order 且 `recoveryRequired=false`；失败时不会撤单、平仓、删除 checkpoint 或自动修复。它使用固定 Mock Evidence 调用真实 `/v1/systemone`，不连接 Search，也不允许 Shadow verdict 进入 Binance signal/risk/order decision。首个 Fill 只停止继续转发 market tick；user-data stream 会保留到剩余 Fill、Position 持久化和最终 reconciliation 完成。`LAYA_BASE_URL` 缺失或真实 endpoint 不可用时，`CLOSURE_REPORT.realLaya` 明确为 `FAIL`，不会回退到 fake provider。
 
