@@ -55,6 +55,28 @@ AI 判断
 
 Prospective 前冻结 Reviewer Prompt、Verdict contract、Label、Output schema、Ground Truth rule、Evaluation rule；不冻结 Trading Core bug fix、Observability 和无关基础设施。
 
+### 9.1 Strategy Lab Formal 1m Protocol
+
+Strategy Lab 的 Candidate admission 已冻结为 `v1.0.0`：
+
+```text
+cadence = 1-minute fully closed candle
+baseline = first complete candle after listing
+fdv = historical closed spot × verified total supply
+yesPrice = latest known point <= snapshot.ts
+interpolation = forbidden
+future data = forbidden
+```
+
+PENGU 暴露出的逐笔 / 1m 差异被保留为方法发现：
+
+```text
+DIAGNOSTIC_TRADES → MICROSTRUCTURE_SENSITIVE
+FORMAL_1M → NO_CANDIDATE
+```
+
+由于仓库没有归档完整 PENGU 原始逐笔、1m 与 Polymarket history artifact，它不升级为 FORMAL historical sample，也不用于宣称 alpha。完整收尾记录见 [Strategy Lab 收尾](strategy-lab-closeout.md)。
+
 ## 10. Prospective Paper Sampling
 
 ```text
