@@ -6,46 +6,57 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const script = new URL("../scripts/acquire-formal-case-1.sh", import.meta.url).pathname;
+const bashOnly = process.platform === "win32" ? "requires a POSIX Bash environment" : false;
 
-test("acquisition publishes raw and metadata only after curl success and 2xx", async () => {
-  const root = await mkdtemp(join(tmpdir(), "artifact-acquire-success-"));
-  try {
-    const fakeCurl = await writeFakeCurl(root, true);
-    const result = spawnSync("bash", [script], {
-      env: { ...process.env, OUTPUT_DIR: join(root, "out"), CURL_BIN: fakeCurl },
-      encoding: "utf8"
-    });
-    assert.equal(result.status, 0, result.stderr);
-    const files = await readdir(join(root, "out"));
-    assert.equal(files.some((file) => file.includes(".tmp.")), false);
-    for (const name of ["fed-statement", "fed-sep", "coinbase-btc-usd-1m"]) {
-      assert.ok(files.includes(`${name}.raw`));
-      assert.ok(files.includes(`${name}.headers.raw`));
-      const metadata = JSON.parse(await readFile(join(root, "out", `${name}.metadata.json`), "utf8"));
-      assert.equal(metadata.curlExitCode, 0);
-      assert.equal(metadata.httpStatus, 200);
-      assert.equal(Number.isFinite(metadata.retrievedAt), true);
-      assert.match(metadata.rawSha256, /^[a-f0-9]{64}$/);
+test(
+  "acquisition publishes raw and metadata only after curl success and 2xx",
+  { skip: bashOnly },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "artifact-acquire-success-"));
+    try {
+      const fakeCurl = await writeFakeCurl(root, true);
+      const result = spawnSync("bash", [script], {
+        env: { ...process.env, OUTPUT_DIR: join(root, "out"), CURL_BIN: fakeCurl },
+        encoding: "utf8"
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const files = await readdir(join(root, "out"));
+      assert.equal(files.some((file) => file.includes(".tmp.")), false);
+      for (const name of ["fed-statement", "fed-sep", "coinbase-btc-usd-1m"]) {
+        assert.ok(files.includes(`${name}.raw`));
+        assert.ok(files.includes(`${name}.headers.raw`));
+        const metadata = JSON.parse(
+          await readFile(join(root, "out", `${name}.metadata.json`), "utf8")
+        );
+        assert.equal(metadata.curlExitCode, 0);
+        assert.equal(metadata.httpStatus, 200);
+        assert.equal(Number.isFinite(metadata.retrievedAt), true);
+        assert.match(metadata.rawSha256, /^[a-f0-9]{64}$/);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
-  } finally {
-    await rm(root, { recursive: true, force: true });
   }
-});
+);
 
-test("acquisition removes temporary response data and emits no artifacts on failure", async () => {
-  const root = await mkdtemp(join(tmpdir(), "artifact-acquire-failure-"));
-  try {
-    const fakeCurl = await writeFakeCurl(root, false);
-    const result = spawnSync("bash", [script], {
-      env: { ...process.env, OUTPUT_DIR: join(root, "out"), CURL_BIN: fakeCurl },
-      encoding: "utf8"
-    });
-    assert.equal(result.status, 1);
-    assert.deepEqual(await readdir(join(root, "out")), []);
-  } finally {
-    await rm(root, { recursive: true, force: true });
+test(
+  "acquisition removes temporary response data and emits no artifacts on failure",
+  { skip: bashOnly },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "artifact-acquire-failure-"));
+    try {
+      const fakeCurl = await writeFakeCurl(root, false);
+      const result = spawnSync("bash", [script], {
+        env: { ...process.env, OUTPUT_DIR: join(root, "out"), CURL_BIN: fakeCurl },
+        encoding: "utf8"
+      });
+      assert.equal(result.status, 1);
+      assert.deepEqual(await readdir(join(root, "out")), []);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   }
-});
+);
 
 async function writeFakeCurl(root: string, succeeds: boolean): Promise<string> {
   const path = join(root, "fake-curl.sh");
