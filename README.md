@@ -17,7 +17,7 @@
 - Historical Replay：用于验证策略假设，而不是事后包装收益
 
 当前默认模式仍然是 **Paper Trading / Binance Futures Testnet**。  
-仓库当前主线不启用真钱自动交易；在 Paper / Testnet 工程闭环稳定后，项目允许进入受控的 **Live Micro-Capital Validation（小额真实资金验证）**，用于验证模拟环境难以完全覆盖的真实交易行为。
+仓库当前主线不启用真钱自动交易；在 Paper / Testnet 工程闭环稳定后，项目允许进入受控的 **小额真实资金验证（Live Micro-Capital Validation）**，用于验证模拟环境难以完全覆盖的真实交易行为。
 
 小额真实资金验证的目标是验证关键业务假设，而不是把研究系统包装成生产级实盘系统。即使完成真实资金验证，项目也不会因此宣称具备 7×24 无人值守、高可用、机构级风控或大资金安全能力。
 
@@ -98,7 +98,7 @@ REST 请求成功不会被直接当成 ACK，Fill 和 CancelAck 只通过 execut
 
 ---
 
-### 2. Projected Position（预计仓位）
+### 2. 预计仓位（Projected Position）
 
 真实交易中，订单提交以后到 Fill 到达之前存在时间窗口。
 
@@ -163,7 +163,7 @@ Position
 
 ---
 
-### 5. Checkpoint 与 Fail-Closed Recovery
+### 5. 检查点与故障关闭恢复（Checkpoint / Fail-Closed Recovery）
 
 Core 将以下状态原子写入：
 
@@ -199,7 +199,7 @@ RECOVERY_REQUIRED
 
 ---
 
-### 6. Reconciliation（对账）
+### 6. 对账与状态收敛（Reconciliation）
 
 恢复时，本地状态不能直接假设自己是正确的。
 
@@ -260,7 +260,7 @@ REST 下单请求关闭自动 retry，避免网络超时情况下生成潜在重
 
 ---
 
-### 8. AI Shadow Reviewer
+### 8. AI 影子评审（AI Shadow Reviewer）
 
 AI 当前不是交易决策者。
 
@@ -286,7 +286,7 @@ ABSTAIN
 
 ---
 
-### 9. Historical Replay
+### 9. 历史回放（Historical Replay）
 
 Historical Replay 用于验证策略判断，而不是制造“AI 好像预测成功”的案例。
 
@@ -431,7 +431,7 @@ Open Orders Snapshot
 - user-data disconnect gap
 - local / exchange mismatch
 
-### Joint Closure Smoke
+### 联合收官冒烟（Joint Closure Smoke）
 
 联合收官冒烟在同一次运行中并行验收 authenticated Binance execution 与真实 Laya Shadow：
 
@@ -566,9 +566,17 @@ README 只描述**当前系统形态**。完整设计依据、故障案例、AI 
 
 这个项目目前定位为：
 
-> **Perpetual Futures Trading Engineering Research Bot**
+> **永续合约交易工程研究机器人（Perpetual Futures Trading Engineering Research Bot）**
 
 重点是交易执行可靠性、状态一致性、恢复边界以及 AI 辅助交易架构。
+
+当前验证层级：
+
+| 验证层级 | 当前状态 | 目标 |
+| --- | --- | --- |
+| 模拟盘 / 测试网（Paper / Testnet） | 当前主线 | 验证策略、订单生命周期、仓位、保证金、恢复与对账 |
+| 小额真实资金验证（Live Micro-Capital Validation） | 下一阶段，尚未完成 | 用受控小额资金验证真实 API、ACK / Fill、手续费、资金费和交易所权威状态 |
+| 生产级实盘（Production-grade Live Trading） | 非当前项目范围 | 需要进一步具备高可用、完整监控、事故恢复、资金安全与长期无人值守能力 |
 
 当前明确不包含：
 
@@ -582,7 +590,7 @@ README 只描述**当前系统形态**。完整设计依据、故障案例、AI 
 
 ### 真实资金验证边界
 
-项目后续可以进入 **Live Micro-Capital Validation（小额真实资金验证）**，但必须与生产级实盘严格区分。
+项目后续可以进入 **小额真实资金验证（Live Micro-Capital Validation）**，但必须与生产级实盘严格区分。
 
 它只用于验证：
 
