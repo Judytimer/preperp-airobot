@@ -43,6 +43,7 @@
 
 - [AI Shadow 研究边界](research/ai-shadow.md)
 - [验证方法：Historical Replay / FORMAL / Prospective](research/validation-methodology.md)
+- [Strategy Lab 收尾：Formal 1m Protocol × PENGU](research/strategy-lab-closeout.md)
 - [Prediction Market Overlay 实验](research/prediction-overlay.md)
 - [FORMAL Case #1：候选筛选](research/formal-case-1-candidate-screen.md)
 - [FORMAL Case #1：原始证据获取记录](research/formal-case-1-artifact-acquisition.md)
