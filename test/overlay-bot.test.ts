@@ -95,6 +95,32 @@ test("full Shadow capacity skips without changing BUY, ACK, or Fill", async () =
   await runner.drain(100);
 });
 
+test("paper execution records adverse fixed-bps slippage, zero fees, and timestamp chain", async () => {
+  const bot = new MemePredictionOverlayBot({
+    spotRiseTriggerPct: 0.5,
+    exitYesPrice: 0.7,
+    maxRiskBudget: 100,
+    fillDelayMs: 0,
+    slippageBps: 100,
+    logger: () => undefined
+  });
+
+  await enter(bot);
+  await bot.waitForIdle();
+  await bot.onSnapshot(snapshot(3, 170, 1_700, 2_000, 0.75));
+  await bot.waitForIdle();
+
+  const [entry, exit] = bot.getExecutionRecords();
+  assert.equal(entry.referencePrice, 0.35);
+  assert.equal(entry.fillPrice, 0.3535);
+  assert.equal(exit.referencePrice, 0.75);
+  assert.equal(exit.fillPrice, 0.7425);
+  assert.equal(entry.slippageBps, 100);
+  assert.equal(entry.fee, 0);
+  assert.ok(entry.signalAt <= entry.submitAt);
+  assert.ok(entry.submitAt <= entry.fillAt);
+});
+
 function overlayBot(logs: string[], shadowRunner?: BoundedShadowRunner) {
   return new MemePredictionOverlayBot({
     spotRiseTriggerPct: 0.5,

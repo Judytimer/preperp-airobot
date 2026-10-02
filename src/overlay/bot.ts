@@ -5,6 +5,7 @@ import type { ExecutionEvent, Logger, OrderRequest } from "../types.ts";
 import {
   formatOverlayAck,
   formatOverlayFill,
+  formatOverlayExecution,
   formatOverlayPosition,
   formatOverlayRisk,
   formatOverlaySignal,
@@ -16,6 +17,7 @@ import { PredictionPositionBook } from "./position.ts";
 import { OverlayRiskManager } from "./risk.ts";
 import { MemePredictionOverlayStrategy } from "./strategy.ts";
 import type {
+  OverlayPaperExecutionRecord,
   PredictionPosition,
   ResearchSnapshot,
   ShadowRunner,
@@ -29,6 +31,16 @@ export type MemePredictionOverlayBotConfig = {
   fillDelayMs: FillDelay;
   logger?: Logger;
   shadowRunner?: ShadowRunner;
+  /** Fixed adverse paper-fill stress. Zero preserves the old no-slippage mode. */
+  slippageBps?: number;
+};
+
+type PendingOverlayOrder = {
+  readonly order: OrderRequest;
+  readonly referencePrice: number;
+  readonly slippageBps: number;
+  readonly signalAt: number;
+  readonly submitAt: number;
 };
 
 export class MemePredictionOverlayBot {
@@ -37,14 +49,23 @@ export class MemePredictionOverlayBot {
   private readonly exchange: SimulatedExchange;
   private readonly logger: Logger;
   private readonly shadowRunner: ShadowRunner | undefined;
-  private readonly pendingOrders = new Map<string, OrderRequest>();
+  private readonly pendingOrders = new Map<string, PendingOverlayOrder>();
+  private readonly executionRecords: OverlayPaperExecutionRecord[] = [];
+  private readonly slippageBps: number;
   private nextClientOrderId = 1;
   private positionBook: PredictionPositionBook | null = null;
 
   constructor(config: MemePredictionOverlayBotConfig) {
+    const slippageBps = config.slippageBps ?? 0;
+    if (!Number.isFinite(slippageBps) || slippageBps < 0 || slippageBps >= 10_000) {
+      throw new Error("slippageBps must be finite and in [0, 10000)");
+    }
     this.strategy = new MemePredictionOverlayStrategy(config);
     this.risk = new OverlayRiskManager({ maxRiskBudget: config.maxRiskBudget });
-    this.exchange = new SimulatedExchange(config.fillDelayMs);
+    // Prediction-market fees vary by venue. This paper boundary declares ZERO
+    // rather than silently inheriting the perpetual simulator's default fee.
+    this.exchange = new SimulatedExchange(config.fillDelayMs, 0);
+    this.slippageBps = slippageBps;
     this.logger = config.logger ?? console.log;
     this.shadowRunner = config.shadowRunner;
     this.exchange.onExecutionEvent((event) => this.onExecutionEvent(event));
@@ -87,9 +108,20 @@ export class MemePredictionOverlayBot {
     }
 
     const clientOrderId = `OVERLAY-${this.nextClientOrderId++}`;
-    this.pendingOrders.set(clientOrderId, decision.order);
-    this.logger(formatPending(clientOrderId, decision.order));
-    await this.exchange.submit({ clientOrderId, request: decision.order });
+    const submitAt = Date.now();
+    const executionOrder = {
+      ...decision.order,
+      price: stressedFillPrice(decision.order.price, decision.order.side, this.slippageBps)
+    };
+    this.pendingOrders.set(clientOrderId, {
+      order: executionOrder,
+      referencePrice: decision.order.price,
+      slippageBps: this.slippageBps,
+      signalAt: decision.order.ts,
+      submitAt
+    });
+    this.logger(formatPending(clientOrderId, executionOrder));
+    await this.exchange.submit({ clientOrderId, request: executionOrder });
   }
 
   async waitForIdle(): Promise<void> {
@@ -103,9 +135,13 @@ export class MemePredictionOverlayBot {
     return this.positionBook.get();
   }
 
+  getExecutionRecords(): readonly OverlayPaperExecutionRecord[] {
+    return structuredClone(this.executionRecords);
+  }
+
   private getProjectedShares(): number {
     let shares = this.positionBook!.get().shares;
-    for (const order of this.pendingOrders.values()) {
+    for (const { order } of this.pendingOrders.values()) {
       shares += order.side === "BUY" ? order.qty : -order.qty;
     }
     return round(shares, 6);
@@ -118,8 +154,32 @@ export class MemePredictionOverlayBot {
     }
     if (event.type !== "FILL") return;
     this.logger(formatOverlayFill(event.fill));
+    const pending = this.pendingOrders.get(event.fill.clientOrderId);
+    if (pending === undefined) throw new Error(`missing pending order ${event.fill.clientOrderId}`);
+    const executionRecord: OverlayPaperExecutionRecord = {
+      clientOrderId: event.fill.clientOrderId,
+      side: event.fill.side,
+      referencePrice: pending.referencePrice,
+      fillPrice: event.fill.price,
+      slippageBps: pending.slippageBps,
+      fee: event.fill.fee,
+      signalAt: pending.signalAt,
+      submitAt: pending.submitAt,
+      fillAt: event.fill.ts
+    };
+    this.executionRecords.push(executionRecord);
+    this.logger(formatOverlayExecution(executionRecord));
     this.pendingOrders.delete(event.fill.clientOrderId);
     const position = this.positionBook!.applyFill(event.fill);
     this.logger(formatOverlayPosition(position));
   }
+}
+
+function stressedFillPrice(
+  referencePrice: number,
+  side: OrderRequest["side"],
+  slippageBps: number
+): number {
+  const direction = side === "BUY" ? 1 : -1;
+  return round(referencePrice * (1 + direction * slippageBps / 10_000));
 }

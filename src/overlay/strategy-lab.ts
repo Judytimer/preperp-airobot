@@ -84,7 +84,8 @@ export function buildFormalOneMinuteSnapshots(input: FormalOneMinuteInput): read
         marketId: input.marketId,
         question: input.question,
         targetFdv: input.targetFdv,
-        yesPrice: yesPoint.yesPrice
+        yesPrice: yesPoint.yesPrice,
+        yesPriceObservedAt: yesPoint.ts
       }
     };
   });
