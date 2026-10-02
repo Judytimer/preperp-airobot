@@ -69,6 +69,11 @@ test("formal protocol rejects candle gaps and future-only YES history", () => {
   const futureBase = input({ listingAt: 0 });
   const futureOnly = { ...futureBase, yesPrices: [{ ts: 999_999, yesPrice: 0.5 }] };
   assert.throws(() => buildFormalOneMinuteSnapshots(futureOnly), /missing historical YES/);
+
+  const shortBase = input({ listingAt: 0 });
+  const shortCandle = structuredClone(shortBase);
+  shortCandle.candles[0].closeTs = 29_999;
+  assert.throws(() => buildFormalOneMinuteSnapshots(shortCandle), /candle is invalid/);
 });
 
 function input(options: {
