@@ -17,6 +17,8 @@ test("formal protocol uses first complete post-listing candle and last-known YES
   assert.equal(snapshots[0].ts, 119_999);
   assert.equal(snapshots[0].meme.spotPrice, 110);
   assert.equal(snapshots[0].prediction.yesPrice, 0.3);
+  assert.equal(snapshots[0].prediction.yesPriceObservedAt, 90_000);
+  assert.ok(snapshots.every((snapshot) => snapshot.prediction.yesPriceObservedAt! <= snapshot.ts));
   assert.equal(snapshots[1].prediction.yesPrice, 0.4);
   assert.equal(snapshots[0].meme.fdv, 110_000);
 });
