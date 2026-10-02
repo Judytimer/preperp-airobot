@@ -1,579 +1,532 @@
-# Perp AI Trading Bot
+# Monad / Perpl 永续合约执行实验
 
-一个基于 TypeScript + Node.js 的永续合约交易工程项目，覆盖 **paper trading、Binance Futures Testnet、执行可靠性研究与 AI 辅助策略评估**。
+> 基于现有永续合约交易核心（Perp Trading Core），验证自动交易系统从 CEX 迁移到 Monad / Perpl 后，执行语义（Execution Semantics）、恢复（Recovery）与对账（Reconciliation）如何变化。
 
-这个项目不是一个“只会跑策略 Demo”的量化机器人。
+这个分支不是新的量化机器人，也不是为了 Monad 重写策略（Strategy）。
 
-它重点解决的是永续合约交易系统里更接近真实工程的问题：
+它要验证的是：
 
-- 异步订单生命周期：`Submit → ACK → Partial Fill → Fill / Cancel`
-- Fill 延迟期间的预计仓位与重复下单问题
-- Partial Fill、乱序事件与 Fill 幂等
-- Isolated Margin、Mark Price、Maintenance Margin 与模拟强平
-- 本地状态持久化、异常重启与订单恢复
-- 本地状态与交易所权威状态的 Reconciliation
-- Binance USDⓈ-M Futures Testnet 接入
-- AI Shadow Reviewer：AI 可以辅助判断，但不能直接控制真实交易执行
-- Historical Replay：用于验证策略假设，而不是事后包装收益
+```text
+Existing Perp Trading Core
+        ↓
+Perpl / Monad Adapter
+        ↓
+DEX Execution Semantics
+        ↓
+Failure / Recovery / Reconciliation
+```
 
-当前默认模式仍然是 **paper trading**。  
-项目不连接真钱账户，也不宣称实现完整交易所清算或生产级自动恢复。
+核心问题只有一个：
+
+> **当交易场所（Venue）从 CEX 变成 Monad 上的 Perp DEX 时，本地交易意图（Trading Intent）如何安全收敛为外部权威事实（Authoritative Trading Fact）？**
 
 ---
 
-## 架构
+## 为什么做这个分支
+
+主项目已经围绕永续合约交易工程（Perpetual Futures Trading Engineering）建立了这些核心能力：
+
+- 订单生命周期（Order Lifecycle）
+- 订单身份（Order Identity）
+- 仓位 / 预计仓位（Position / Projected Position）
+- 确定性风控（Deterministic Risk）
+- 逐仓保证金（Isolated Margin）
+- 恢复（Recovery）
+- 对账（Reconciliation）
+- 外部权威事实来源（External Source of Truth）
+
+在 CEX 中，典型执行链可以概括为：
 
 ```text
-Market
-  ↓
-Strategy
-  ↓
-Risk Manager
-  ↓
-Execution Command
-  ↓
-Exchange / Simulator
-  ↓
-ACK / Partial Fill / Fill / CancelAck
-  ↓
+Command
+→ ACK
+→ Fill
+→ Position
+```
+
+迁移到 Monad / Perpl 后，最先需要重新验证的不是策略，而是执行边界（Execution Boundary）：
+
+```text
+Trading Intent
+→ Protocol Request
+→ Order / Execution State
+→ Authoritative Venue Fact
+→ Local State Convergence
+```
+
+本分支将这个问题暂时概括为：
+
+## 意图—事实鸿沟（Intent–Fact Gap）
+
+> **发出了交易意图（Intent），不等于外部资金事实（Fact）已经按预期发生。**
+
+这只是本项目的设计命题（Design Thesis），不是行业标准术语。
+
+---
+
+## 整体架构
+
+策略和 AI 继续主要运行在链下（Off-chain），Monad / Perpl 负责真实执行语义。
+
+```text
+链下（Off-chain）
+────────────────────────────
+
+Strategy / Prediction Overlay
+AI Shadow
+Deterministic Risk
+Projected Position
+
+        ↓
+
+Trading Intent
+
+        ↓
+
+执行边界（Execution Boundary）
+────────────────────────────
+
+Perpl Adapter
+
+        ↓
+
+Monad / Perpl
+────────────────────────────
+
+Order
+Change
+Cancel
+Fill
+Position
+Margin
+Liquidation
+
+        ↓
+
+Authoritative State
+
+        ↓
+
+链下（Off-chain）
+────────────────────────────
+
 Order Tracker
-  ↓
-Position / Margin
-  ↓
-Checkpoint
-  ↓
+Position Mirror
+Recovery
 Reconciliation
 ```
 
-AI Research Path 与交易执行链保持隔离：
+AI Shadow 继续保持只读 / 研究边界（Review-only Boundary）：
 
-```text
-Strategy Candidate
-  ↓
-AI Shadow Reviewer
-  ↓
-PASS / WOULD_BLOCK / ABSTAIN
-  ↓
-Research Record
-
-        ✕
-不会直接修改真实交易执行
-```
+- 可以解释异常；
+- 可以分析执行证据（Execution Evidence）；
+- 不能直接拥有交易权限；
+- 不能替代协议事实（Protocol Fact）；
+- 不能直接决定恢复交易。
 
 ---
 
-## 工程亮点
+## 哪些能力继续复用（KEEP）
 
-### 1. 异步订单生命周期
-
-订单不是 `submit()` 成功就等于成交。
-
-Core 将交易命令和交易事件分开建模：
+原则上继续复用主项目现有能力：
 
 ```text
-SUBMITTED
-  ↓
-ACKED
-  ↓
-PARTIALLY_FILLED
-  ↓
-FILLED
+Strategy
+AI Shadow
+Deterministic Risk
+Position / Projected Position
+Isolated Margin
+Checkpoint
+Recovery
+Reconciliation
 ```
 
-撤单同样必须等待交易所事件确认：
+这个分支的健康目标是：
 
 ```text
-ACKED / PARTIALLY_FILLED
-  ↓
-CANCEL_REQUESTED
-  ↓
-CancelAck
-  ↓
-CANCELED
-```
-
-REST 请求成功不会被直接当成 ACK，Fill 和 CancelAck 只通过 execution event 推进订单状态。
-
----
-
-### 2. Projected Position（预计仓位）
-
-真实交易中，订单提交以后到 Fill 到达之前存在时间窗口。
-
-如果只根据已成交仓位计算风险，机器人可能在 Fill 延迟期间重复下单。
-
-因此风控使用：
-
-```text
-Projected Position
-=
-Filled Position
+latest Trading Core
 +
-Unresolved Order Remaining Qty
+thin Monad / Perpl delta
 ```
 
-Partial Fill 后只计算剩余未成交数量，不会重复计算整张原始订单。
+也就是：**尽量只增加 Monad / Perpl 必需的那一层，而不是重新长出第二套 Trading Core。**
 
 ---
 
-### 3. 部分成交与幂等
+## 哪些地方必须变化（CHANGE）
 
-系统显式处理：
+真正需要重新验证的是执行场所适配（Venue Adaptation）和身份映射（Identity Mapping）。
 
-- Partial Fill
-- 延迟 Fill
-- Fill-before-ACK 异常
-- 重复 Fill
-- 乱序事件
-- 跨零仓位更新
-
-有效 Fill 会进入 checkpoint 的幂等集合，避免重启或事件重放造成重复加仓。
-
----
-
-### 4. 逐仓保证金与强平模型
-
-行情区分：
+### CEX 常见模型
 
 ```text
-lastPrice
-markPrice
-indexPrice
-```
-
-其中：
-
-- Strategy / simulated execution 使用 `lastPrice`
-- Unrealized PnL / Margin / Liquidation 使用 `markPrice`
-- `indexPrice` 仅作为外部参考输入
-
-系统实现最小逐仓模型：
-
-```text
-Position
-→ Initial Margin
-→ Maintenance Margin
-→ Equity
-→ Liquidation Trigger
-```
-
-当前 paper model 为了保持边界清晰，模拟强平价格直接使用 mark price，不宣称复刻真实交易所清算引擎。
-
----
-
-### 5. Checkpoint 与 Fail-Closed Recovery
-
-Core 将以下状态原子写入：
-
-```text
-.runtime/perp-bot-state.json
-```
-
-包括：
-
-- client order identity
-- order sequence
-- position
-- order state
-- processed fills
-- funding events
-
-如果程序重启时存在 unresolved order：
-
-```text
-SUBMITTED
-ACKED
-PARTIALLY_FILLED
-CANCEL_REQUESTED
-```
-
-系统不会猜测订单最终状态，而是进入：
-
-```text
-RECOVERY_REQUIRED
-```
-
-并停止继续下单。
-
----
-
-### 6. Reconciliation（对账）
-
-恢复时，本地状态不能直接假设自己是正确的。
-
-系统支持只读比较：
-
-```text
-Local Position
-vs
-Exchange Position
-
-Local Open Orders
-vs
-Exchange Open Orders
-```
-
-检测：
-
-- position mismatch
-- missing order
-- unexpected order
-- remaining quantity mismatch
-
-当前版本采取 **fail-closed**：
-
-发现不一致后停止交易，不自动覆盖本地状态，也不擅自重发订单。
-
----
-
-### 7. Binance Futures Testnet
-
-项目提供 Binance USDⓈ-M Futures Testnet adapter。
-
-策略和 Core 不依赖 Binance SDK，adapter 只负责：
-
-```text
-Market Data
-Order Submit
-Order Cancel
-User Data Stream
-Exchange Event Translation
-```
-
-交易所事件会被翻译为项目内部统一事件：
-
-```text
-ACK
-Fill
-CancelAck
-```
-
-Testnet runner 要求：
-
-- One-way Mode
-- BTCUSDT
-- Isolated Margin
-
-REST 下单请求关闭自动 retry，避免网络超时情况下生成潜在重复订单。
-
----
-
-### 8. AI Shadow Reviewer
-
-AI 当前不是交易决策者。
-
-它只能在独立 Shadow Path 中对策略 Candidate 做研究性判断：
-
-```text
-PASS
-WOULD_BLOCK
-ABSTAIN
-```
-
-但 Shadow 结果不能：
-
-- 修改原 Strategy Signal
-- 修改 Risk Decision
-- 阻止确定性退出逻辑
-- 直接生成 Perp Order
-- 直接控制交易所
-
-这是刻意设计的权限边界：
-
-> 先验证 AI 有没有稳定的信息增益，再讨论是否允许它影响交易。
-
----
-
-### 9. Historical Replay
-
-Historical Replay 用于验证策略判断，而不是制造“AI 好像预测成功”的案例。
-
-每个案例明确记录：
-
-```text
-T0
-Input Provenance
-Ground Truth Rule
-Outcome Window
-Baseline Result
-Shadow Result
-```
-
-并区分：
-
-```text
-DEMO
-QUALITATIVE_ONLY
-FORMAL
-```
-
-只有满足：
-
-- T0 前已存在的输入
-- 可验证的历史原始数据
-- 预先定义的 Ground Truth
-- 可测量 Outcome
-
-才允许进入 `FORMAL`。
-
-这可以避免典型的 hindsight bias：
-
-> 事件发生以后重新搜资料，再声称 AI 当时能够判断出来。
-
----
-
-## 快速开始
-
-### 环境
-
-```text
-Node.js 22+
-npm
-```
-
-项目使用 Node.js `--experimental-strip-types`，无需额外 TypeScript 编译步骤。
-
-安装依赖：
-
-```bash
-npm install
-```
-
-运行默认 paper bot：
-
-```bash
-npm start
-```
-
-运行完整工程 Demo：
-
-```bash
-npm run demo
-```
-
-Demo 会展示：
-
-```text
-Market Tick
-→ Signal
-→ Risk
-→ Submit
+clientOrderId
+→ submit
 → ACK
-→ Partial Fill
+→ exchangeOrderId
 → Fill
-→ Position
-→ Margin
-→ Checkpoint
+```
+
+### Perpl 当前接口语义
+
+Perpl 当前官方接口中：
+
+```text
+rq
+= strictly increasing request ID
+= idempotency key
+
+sn
+= client-provided non-zero sequence
+→ echoed by server as cid
+```
+
+因此本项目不会把内部的 `clientOrderId` 直接重命名成 `rq`。
+
+更合理的边界是：
+
+```text
+Internal Trading Identity
+        ↓
+Perpl Adapter
+        ├─ rq
+        ├─ sn / cid
+        └─ protocol order identity
+```
+
+也就是：
+
+> **核心领域身份（Core Domain Identity）继续由 Trading Core 持有，Perpl Adapter 负责协议身份翻译（Venue Identity Mapping）。**
+
+---
+
+## 外部权威状态（External Source of Truth）
+
+这个分支不会为了“更 Web3”而自己重做完整链上状态机（Blockchain State Machine）。
+
+Perpl 已经提供认证后的 WebSocket 状态流（Authenticated WebSocket State Stream）。
+
+建立连接后可以获得：
+
+```text
+WalletSnapshot
+OrdersSnapshot
+PositionsSnapshot
+```
+
+后续通过：
+
+```text
+Command Status
+Order Updates
+WalletFills
+```
+
+持续维护交易状态。
+
+因此第一阶段主要使用：
+
+```text
+Perpl Snapshots
++
+Order Updates
++
+Fills
+        ↓
+Local Mirror
+        ↓
+Reconciliation
+```
+
+原始交易回执 / 终局性引擎（Raw Transaction / Finality Engine）暂不进入第一阶段。
+
+---
+
+## 第一条真实故障（First Real Failure）
+
+本分支不为了“增加难度”人为制造复杂系统。
+
+第一阶段只验证一个 Perpl 官方已经公开记录的 Monad 特有执行问题（Monad-specific Execution Failure）：
+
+```text
+Cancel
+        ↓
+separate Post transaction
+        ↓
+cancel 对应的 margin release 尚未完成
+        ↓
+new Post 做 balance / margin check
+        ↓
+AmountExceedsAvailableBalance
+```
+
+Perpl 官方开发建议明确指出：
+
+- 分开的 `Cancel → Post`（two transactions）是脆弱模式；
+- 问题不是简单“多等一会儿”（wait longer）；
+- 更优方向是修改订单（`Change`）；
+- 如果必须 cancel + post，应放在同一笔交易（same transaction / batch）中。
+
+这个 Failure 的价值不在于“Monad 很复杂”，而在于它直接检验：
+
+> **Trading Core 会不会错误地把“已经发出 Cancel”当成“保证金已经释放、旧订单已经消失”。**
+
+---
+
+## 与主项目的关系
+
+这个问题与主项目长期研究的以下主题属于同一条业务主线：
+
+```text
+Ghost Order
+Cancel / Fill Race
+Order Identity
+Projected Position
+Recovery
+Reconciliation
+External Source of Truth
+```
+
+区别在于：
+
+```text
+CEX
+→ exchange-side execution uncertainty
+
+Monad / DEX
+→ protocol / asynchronous execution uncertainty
+```
+
+所以 Monad 分支不是离开永续合约交易开发去“重新学 Web3”。
+
+它是在同一套 Perp Trading Core 上验证：
+
+> **交易场所发生变化以后，哪些业务不变量（Invariant）仍然成立。**
+
+---
+
+## 保证金（Margin）
+
+当前继续使用逐仓保证金（Isolated Margin）。
+
+Perpl 当前官方文档明确采用 isolated margin：
+
+- 每个仓位（Position）有自己的保证金；
+- 账户空闲余额不会自动为其他仓位补充保证金；
+- 当前没有已确认上线的 Cross Margin。
+
+因此：
+
+```text
+KEEP Isolated Margin
+DEFER Cross Margin
+```
+
+只有未来接入真实使用全仓保证金（Cross Margin）的 Venue 时，才让真实协议差异推动新的抽象。
+
+---
+
+## 第一阶段里程碑（First Milestone）
+
+第一阶段不追求完整 DEX Trading Platform。
+
+只完成：
+
+```text
+1. Perpl authentication / connection
+
+2. Internal identity
+   ↔ rq / sn / cid / protocol identity mapping
+
+3. Initial snapshots
+
+4. One real Order Lifecycle
+
+5. Cancel → independent Post failure
+
+6. Change / atomic operation comparison
+
+7. Recovery / Reconciliation
+```
+
+成功标准不是代码量，而是完整证明一次：
+
+```text
+Intent
+→ Execution
+→ Failure
+→ Safe Halt
+→ Authoritative Evidence
 → Reconciliation
 ```
 
 ---
 
-## 测试
+## Demo 叙事
 
-```bash
-npm test
+Hackathon Demo 不重点展示：
+
+- 复杂 K 线 UI；
+- 新交易策略；
+- AI 猜涨跌；
+- 完整交易终端。
+
+重点展示：
+
+```text
+Trading Intent created
+        ↓
+Execution enters uncertain state
+        ↓
+Local system refuses to invent venue truth
+        ↓
+Risk expansion is stopped
+        ↓
+Perpl authoritative state arrives
+        ↓
+Reconciliation
+        ↓
+Trading Core returns to a known-safe state
 ```
 
-测试覆盖核心交易边界，包括：
+核心问题是：
 
-- Signal → Order → ACK → Fill
-- Projected Position
-- Partial Fill
-- Fill idempotency
-- Out-of-order Fill
-- Target position delta
-- Cross-zero position
-- Margin validation
-- Liquidation path
-- Checkpoint recovery
-- Reconciliation
+> **自动交易系统如何避免把自己的意图（Intent）错当成资金事实（Financial Fact）。**
 
 ---
 
-## Binance Futures Testnet
+## AI Shadow 的角色
 
-无 API Key 时可以先运行只读行情：
-
-```bash
-npm run testnet:market
-```
-
-配置 Binance Futures Testnet：
-
-```powershell
-$env:BINANCE_TESTNET_API_KEY = "..."
-$env:BINANCE_TESTNET_API_SECRET = "..."
-npm run testnet
-```
-
-Testnet 使用独立 checkpoint：
+AI 在这个分支里可以读取：
 
 ```text
-.runtime/binance-testnet-state.json
-```
-
-运行结束后会获取交易所权威：
-
-```text
-Position Snapshot
-Open Orders Snapshot
-```
-
-并执行一次只读 reconciliation。
-
-出现以下异常时系统保持 fail-closed：
-
-- submit timeout
-- Fill-before-ACK
-- user-data disconnect gap
-- local / exchange mismatch
-
-### Joint Closure Smoke
-
-联合收官冒烟在同一次运行中并行验收 authenticated Binance execution 与真实 Laya Shadow：
-
-```powershell
-$env:BINANCE_TESTNET_API_KEY = "..."
-$env:BINANCE_TESTNET_API_SECRET = "..."
-$env:LAYA_BASE_URL = "http://127.0.0.1:8000"
-# 仅当 Laya endpoint 要求认证时设置：
-$env:LAYA_API_KEY = "..."
-npm run smoke:closure
-```
-
-该入口在任何 market tick 进入 `PerpBot` 前要求本地/venue reconciliation 一致、双方 Position 均为 FLAT、venue 无 open order 且 `recoveryRequired=false`；失败时不会撤单、平仓、删除 checkpoint 或自动修复。它使用固定 Mock Evidence 调用真实 `/v1/systemone`，不连接 Search，也不允许 Shadow verdict 进入 Binance signal/risk/order decision。首个 Fill 只停止继续转发 market tick；user-data stream 会保留到剩余 Fill、Position 持久化和最终 reconciliation 完成。`LAYA_BASE_URL` 缺失或真实 endpoint 不可用时，`CLOSURE_REPORT.realLaya` 明确为 `FAIL`，不会回退到 fake provider。
-
----
-
-## 策略
-
-### 执行基线
-
-项目保留简单 Moving Average Strategy 作为：
-
-```text
-baseline
-control
-execution pressure generator
-```
-
-它的职责不是证明交易 Alpha，而是稳定地产生交易行为，用来压力测试：
-
-```text
-Risk
-Order Lifecycle
-Partial Fill
+Execution Trace
 Position
 Margin
+Protocol Evidence
+Reconciliation Report
+```
+
+并解释：
+
+- 为什么系统进入暂停（HALT）；
+- 哪个业务不变量（Invariant）被破坏；
+- 当前是否存在未解决风险敞口（Unresolved Exposure）；
+- 还缺什么执行证据（Execution Evidence）。
+
+但：
+
+```text
+ALLOW
+HALT
+RECOVERY_REQUIRED
+```
+
+仍由确定性规则（Deterministic Rules）和协议事实（Protocol Facts）决定。
+
+一句话：
+
+> **AI 负责调查（Investigate），协议事实负责裁决（Decide）。**
+
+---
+
+## Monad Metropolis 定位
+
+这个项目不把自己描述成：
+
+> AI Trading Bot on Monad
+
+当前更准确的定位是：
+
+> **在 Monad 上验证自动化永续合约交易的执行安全（Execution Safety），并使用 Perpl 作为真实协议场景。**
+
+更进一步的叙事是：
+
+```text
+AI / Strategy
+creates Intent
+
+Monad
+executes finance at high speed
+
+Trading Core
+must safely converge Intent
+into verifiable financial Fact
+```
+
+“通用自主金融基础设施（Autonomous Finance Infrastructure）”目前仍然只是愿景，不是已经完成的产品能力。
+
+---
+
+## 范围边界（Scope）
+
+### 本阶段包含（In Scope）
+
+```text
+Perpl Adapter
+Identity Mapping
+Order Lifecycle
+Execution Failure
+State Snapshot
 Recovery
 Reconciliation
+Minimal Demo
 ```
 
----
-
-## AI 策略研究
-
-项目还包含一个实验性：
+### 本阶段暂缓（DEFER）
 
 ```text
-Meme + Prediction Overlay
+Cross Margin
+Multi-DEX Framework
+Raw Finality Engine
+New Strategy
+Complex Frontend
+Generic Agent Platform
+MCP / Multi-Agent Orchestration
+Event Sourcing Rewrite
 ```
 
-当 Meme asset 已明显上涨时，策略不会继续追高现货，而是在固定最大风险预算下模拟购买更高 FDV 目标对应的 Prediction YES。
+原则：
 
-Prediction Market 与 Perpetual Futures 保持独立业务语义，不存在：
+> **没有真实 Failure 或协议约束，就不增加复杂度。**
+
+---
+
+## 当前状态（Current Status）
+
+已完成：
 
 ```text
-YES → Perp LONG
-NO  → Perp SHORT
+✓ hackathon/monad branch
+✓ Monad / Perpl 方向冻结
+✓ Perpl API / WebSocket 事实核查
+✓ Isolated Margin 语义核查
+✓ rq / sn / cid 身份语义核查
+✓ authoritative snapshot 路径核查
+✓ Cancel → Post Failure 官方证据核查
 ```
 
-当前 AI 只运行于 Shadow Mode。
-
-运行：
-
-```bash
-npm run overlay
-```
-
-这条链复用现有 `OrderRequest -> SimulatedExchange -> ACK -> Pending -> Fill`，并使用 Prediction 专用策略、风险与 long-only YES 仓位账本。`BUY_YES` Candidate 启动 `ShadowRunner` 后会立刻继续原 Risk / Execution，不等待 Shadow；Runner 在独立的 fire-and-continue 路径中执行 `deterministic ResearchPlan -> async EvidenceSearch -> async LlmStrategyReviewer -> ShadowRecord`。Candidate 是 defensive clone/deep-freeze 的 T0 输入，Runner 不读取 Bot 当前价格、持仓或后续 snapshot。普通 `npm run overlay` demo 仍使用 fake provider ports；联合收官冒烟单独使用 Mock Evidence 与真实 Laya endpoint，仍不连接真实 Search。
-
-Historical Replay：
-
-```bash
-npm run replay
-```
-
----
-
-## 仓库结构
+下一阶段：
 
 ```text
-src/
-├─ bot.ts
-├─ strategy.ts
-├─ risk.ts
-├─ exchange.ts
-├─ order-tracker.ts
-├─ position.ts
-├─ margin.ts
-├─ state-store.ts
-├─ reconciliation.ts
-├─ recovery-evidence.ts
-├─ binance-testnet.ts
-├─ closure-smoke.ts
-├─ historical-replay.ts
-└─ logging.ts
+Perpl Integration Reality Check
+        ↓
+Minimal Adapter
+        ↓
+One Order Lifecycle
 ```
 
-核心入口：
+---
 
-- `src/bot.ts` — trading loop orchestration
-- `src/exchange.ts` — execution command/event boundary
-- `src/order-tracker.ts` — in-flight order lifecycle
-- `src/position.ts` — position accounting
-- `src/margin.ts` — isolated margin model
-- `src/state-store.ts` — checkpoint persistence
-- `src/reconciliation.ts` — local/exchange reconciliation
-- `src/binance-testnet.ts` — Binance Futures Testnet adapter
-- `src/closure-smoke.ts` — authenticated Binance + real Laya joint closure smoke
-- `src/historical-replay.ts` — historical research runner
+## 参考资料（References）
+
+- [Perpl Developer Docs](https://docs.perpl.xyz/)
+- [Perpl API Docs](https://github.com/PerplFoundation/api-docs)
+- [Monad Developer Docs](https://docs.monad.xyz/)
+- [Monad Metropolis](https://monad.xyz/metropolis)
 
 ---
 
-## 设计与实验文档
+## 一句话
 
-README 只描述**当前系统形态**。完整设计依据、故障案例、AI 研究方法和后续路线统一从：
-
-- [docs/README.md](docs/README.md) — 文档阅读地图
-
-进入。
-
-文档按“当前稳定判断 → 真实故障证据 → AI 研究 → 延期设计 → 历史归档”分层，避免把早期实验结论和当前实现混在一起。
-
----
-
-## 当前边界
-
-这个项目目前定位为：
-
-> **Perpetual Futures Trading Engineering Research Bot**
-
-重点是交易执行可靠性、状态一致性、恢复边界以及 AI 辅助交易架构。
-
-当前明确不包含：
-
-- Real-money trading
-- Production-grade exchange HA
-- Full backtesting engine
-- Exchange liquidation engine replication
-- Automatic reconciliation repair
-- AI autonomous trading
-- Proven profitable strategy
-
-这些边界是刻意保留的。
-
-项目首先证明的是：
-
-> **在 AI Coding 能快速生成代码之后，如何把交易业务语义、状态一致性、异常恢复和 AI 权限边界真正落实到一个可运行系统里。**
+> **把交易智能（Trading Intelligence）留在链下，把执行适配到 Perpl，并证明机器人永远不会把自己的交易意图（Intent）误认为外部权威资金事实（Authoritative Financial Fact）。**
