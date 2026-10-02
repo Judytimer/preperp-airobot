@@ -16,8 +16,10 @@
 - AI Shadow Reviewer：AI 可以辅助判断，但不能直接控制真实交易执行
 - Historical Replay：用于验证策略假设，而不是事后包装收益
 
-当前默认模式仍然是 **paper trading**。  
-项目不连接真钱账户，也不宣称实现完整交易所清算或生产级自动恢复。
+当前默认模式仍然是 **Paper Trading / Binance Futures Testnet**。  
+仓库当前主线不启用真钱自动交易；在 Paper / Testnet 工程闭环稳定后，项目允许进入受控的 **Live Micro-Capital Validation（小额真实资金验证）**，用于验证模拟环境难以完全覆盖的真实交易行为。
+
+小额真实资金验证的目标是验证关键业务假设，而不是把研究系统包装成生产级实盘系统。即使完成真实资金验证，项目也不会因此宣称具备 7×24 无人值守、高可用、机构级风控或大资金安全能力。
 
 ---
 
@@ -505,7 +507,9 @@ Historical Replay：
 npm run replay
 ```
 
-Strategy Lab 的正式 Candidate admission 已冻结为 `v1.0.0`：使用 **1-minute fully closed candle**，以上市后的第一根完整 candle 作为 baseline，FDV 由历史 spot × 已核验 total supply 推导，Prediction YES 只取 `snapshot.ts` 之前最后已知值，不插值、不读取未来数据。PENGU 的逐笔/1m 差异保留为 `MICROSTRUCTURE_SENSITIVE` 方法诊断；由于完整 raw artifact 未归档，它不计作 FORMAL historical sample。详见 [Strategy Lab 收尾记录](docs/research/strategy-lab-closeout.md)。
+Strategy Lab 的正式 Candidate admission 已冻结为 `v1.0.0`：使用 **1 分钟完整收盘 K 线（1-minute fully closed candle）**，以上市后的第一根完整 K 线作为基线（baseline），FDV 由历史现货价格 × 已核验总供应量推导，Prediction YES 只取 `snapshot.ts` 之前最后已知值，不插值、不读取未来数据。PENGU 的逐笔/1 分钟差异保留为 `MICROSTRUCTURE_SENSITIVE` 方法诊断；由于完整原始数据证据（raw artifact）未归档，它不计作正式历史样本（FORMAL historical sample）。详见 [Strategy Lab 收尾记录](docs/research/strategy-lab-closeout.md)。
+
+Historical Replay 是一个**有限的诊断阶段**，不是永久运行的研究主线。当前协议冻结后，主线转向 **Prospective Sampling（前瞻采样）**：只有未来样本暴露新的方法问题、数据泄漏或不可复现行为时，才重新打开历史研究，而不会为了增加样本数量持续寻找历史案例。
 
 ---
 
@@ -568,13 +572,27 @@ README 只描述**当前系统形态**。完整设计依据、故障案例、AI 
 
 当前明确不包含：
 
-- Real-money trading
-- Production-grade exchange HA
-- Full backtesting engine
-- Exchange liquidation engine replication
-- Automatic reconciliation repair
-- AI autonomous trading
-- Proven profitable strategy
+- 生产级实盘交易（Production-grade Live Trading）
+- 交易所级高可用（Production-grade Exchange HA）
+- 完整回测引擎（Full Backtesting Engine）
+- 交易所强平引擎复刻（Exchange Liquidation Engine Replication）
+- 自动对账修复（Automatic Reconciliation Repair）
+- AI 自主交易（AI Autonomous Trading）
+- 已证明盈利的策略（Proven Profitable Strategy）
+
+### 真实资金验证边界
+
+项目后续可以进入 **Live Micro-Capital Validation（小额真实资金验证）**，但必须与生产级实盘严格区分。
+
+它只用于验证：
+
+- 真实交易所 API 行为
+- 真实 ACK / Partial Fill / Fill 时序
+- 实际成交价、手续费（fee）与资金费（funding）
+- 交易所权威仓位（exchange-authoritative position）
+- 重启后的恢复（recovery）与对账 / 状态收敛（reconciliation）
+
+即使这些验证全部完成，也只说明核心交易链路在受控的小额真实环境下被验证过，不代表系统已经达到生产级实盘强度。
 
 这些边界是刻意保留的。
 
