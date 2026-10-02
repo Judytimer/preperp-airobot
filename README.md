@@ -505,6 +505,8 @@ Historical Replay：
 npm run replay
 ```
 
+Strategy Lab 的正式 Candidate admission 已冻结为 `v1.0.0`：使用 **1-minute fully closed candle**，以上市后的第一根完整 candle 作为 baseline，FDV 由历史 spot × 已核验 total supply 推导，Prediction YES 只取 `snapshot.ts` 之前最后已知值，不插值、不读取未来数据。PENGU 的逐笔/1m 差异保留为 `MICROSTRUCTURE_SENSITIVE` 方法诊断；由于完整 raw artifact 未归档，它不计作 FORMAL historical sample。详见 [Strategy Lab 收尾记录](docs/research/strategy-lab-closeout.md)。
+
 ---
 
 ## 仓库结构
@@ -524,6 +526,7 @@ src/
 ├─ binance-testnet.ts
 ├─ closure-smoke.ts
 ├─ historical-replay.ts
+├─ overlay/strategy-lab.ts
 └─ logging.ts
 ```
 
@@ -539,6 +542,7 @@ src/
 - `src/binance-testnet.ts` — Binance Futures Testnet adapter
 - `src/closure-smoke.ts` — authenticated Binance + real Laya joint closure smoke
 - `src/historical-replay.ts` — historical research runner
+- `src/overlay/strategy-lab.ts` — frozen 1m Candidate admission protocol
 
 ---
 
