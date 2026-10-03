@@ -12,6 +12,8 @@
     "smoke:closure": "node --experimental-strip-types src/closure-smoke.ts",
     "testnet:market": "node --experimental-strip-types src/testnet-market-smoke.ts",
     "testnet": "node --experimental-strip-types src/testnet-index.ts",
+    "perpl:probe": "node --experimental-strip-types src/perpl-access-probe.ts",
+    "perpl:post-once": "node --experimental-strip-types src/perpl-post-once.ts",
     "acquire:formal-case-1": "bash scripts/acquire-formal-case-1.sh",
     "overlay": "node --experimental-strip-types src/overlay-index.ts",
     "replay": "node --experimental-strip-types src/replay-index.ts",
