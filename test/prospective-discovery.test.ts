@@ -58,6 +58,26 @@ test("a repeated fetch preserves the immutable first-discovery time and does not
   assert.equal((await readdir(join(directory, "markets"))).length, 1);
 });
 
+test("scan summaries are append-only and a scan id collision cannot rewrite evidence", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "prospective-discovery-"));
+  const raw = JSON.stringify([market("FDV-1", "Will TEST exceed $1B FDV?", "2026-10-02T12:00:00Z")]);
+  const first = await runPolymarketDiscoveryScan(directory, {
+    now: () => Date.parse("2026-10-02T12:05:00Z"),
+    fetcher: ok(raw),
+    scanIdFactory: () => "fixed-scan"
+  });
+  const before = await readFile(first.scanPath, "utf8");
+  await assert.rejects(
+    runPolymarketDiscoveryScan(directory, {
+      now: () => Date.parse("2026-10-02T12:10:00Z"),
+      fetcher: ok(raw),
+      scanIdFactory: () => "fixed-scan"
+    }),
+    /scan id collision/
+  );
+  assert.equal(await readFile(first.scanPath, "utf8"), before);
+});
+
 test("future source timestamps are recorded DATA_BLOCKED and ordinary market-cap text is not called FDV", async () => {
   const directory = await mkdtemp(join(tmpdir(), "prospective-discovery-"));
   const raw = JSON.stringify([
@@ -90,6 +110,17 @@ test("HTTP and malformed payload failures publish no scan or market records", as
     /not valid JSON/
   );
   assert.deepEqual(await readdir(jsonDirectory), []);
+
+  const partialDirectory = await mkdtemp(join(tmpdir(), "prospective-discovery-"));
+  const partiallyMalformed = JSON.stringify([
+    market("VALID-1", "Will TEST exceed $1B FDV?", "2026-10-02T12:00:00Z"),
+    { question: "missing market id" }
+  ]);
+  await assert.rejects(
+    runPolymarketDiscoveryScan(partialDirectory, { fetcher: ok(partiallyMalformed) }),
+    /without an id/
+  );
+  assert.deepEqual(await readdir(partialDirectory), []);
 
   const dateDirectory = await mkdtemp(join(tmpdir(), "prospective-discovery-"));
   await assert.rejects(

@@ -75,6 +75,8 @@ npm run prospective:discover
 - 完整原样保存 Gamma 响应、retrievedAt 与 SHA-256；`retrievedAt` 使用响应的 Polymarket HTTP `Date`，同时记录本机请求起止时间与 midpoint offset，避免本机时钟偏差制造 future-data 假象；
 - 每个 marketId 首次出现时，以不可覆盖文件冻结 `registeredAt === firstDiscoveredAt === retrievedAt`；
 - 重复抓取保留原 first-discovery record，不重复登记；
+- 每次扫描使用独立 scanId 且 scan summary 只允许首次创建；相同 ID 冲突时拒绝，禁止覆盖旧扫描；
+- 完整 Gamma payload 会先全部解析成功，再发布 raw、market 与 scan 文件；畸形的后续 market 不得留下半次扫描；
 - 只有明确含 `FDV` 或 `fully diluted valuation/value` 的文本进入 `POTENTIAL_FDV_REVIEW`；普通 `market cap` 不自动等同 FDV；
 - 缺少关键时间或出现未来 `updatedAt` 时记录 `DATA_BLOCKED`；
 - 不读取 API key，不运行 Strategy、Risk、Paper 或 Shadow，也不自动补 supply/token/outcome 字段。
@@ -86,6 +88,13 @@ npm run prospective:discover
 ## 5. Observation 与报告
 
 Observation 结构由 [`strategy-lab-v2-observation.schema.json`](../../schemas/strategy-lab-v2-observation.schema.json) 定义。它必须引用真实 raw Binance Kline 与 Polymarket last-trade artifact，并保存 source URL、source timestamp、retrievedAt、路径和 SHA-256。Runner 还会读取并校验 manifest 中的 Gamma discovery raw artifact。
+
+正式 raw 格式冻结为：
+
+- Binance artifact 是 `/api/v3/klines` 原始 JSON tuple 数组；`openTs = row[0]`、`close = row[4]`、`closeTs = row[6]`；
+- Polymarket artifact 是 JSON 数组或 newline-delimited JSON market-stream 消息，只接受 `last_trade_price`，并只保留 manifest 已冻结的 `yesTokenId`；
+- observation 中的 `candles` 与 `yesPrices` 只是便于审计的副本，必须与 runner 从 raw artifact 确定性解析出的完整序列逐项相等；不相等即 `DATA_BLOCKED`；
+- Strategy 实际接收的是 raw artifact 重新解析后的序列，不接收手填数组作为权威输入。
 
 ```bash
 npm run strategy-lab:replay -- candidate-v2.1.json observation-v2.1.json reports/prospective-v2.1
@@ -103,7 +112,21 @@ reports/prospective-v2.1/<manifestId>/<observationId>.json
 - 相同 observation 重跑复用原报告；同 ID 不同输入禁止覆盖；并发运行由 lock 拒绝。
 - Laya 不可用时记录 `PROVIDER_UNAVAILABLE / REVIEWER_UNAVAILABLE`，Paper 不受影响，不回退 fake provider。
 
-## 6. 研究边界
+## 6. 冻结时间后的 Outcome
+
+T0 报告永不改写。冻结评价时间到达、Polymarket 发布公开 `market_resolved` 事件后，使用单独的 append-only outcome record：
+
+```bash
+npm run prospective:outcome -- \
+  reports/prospective-v2.1/<manifestId>/<observationId>.json \
+  resolution-artifact.json
+```
+
+`resolution-artifact.json` 只保存 provider、公开 market-stream URL、sourceTimestamp、retrievedAt、raw path 与 SHA-256，不接受人工填写 YES/NO verdict。程序从归档的 `market_resolved` raw event 读取 marketId、tokenIds、winningTokenId、winningOutcome 与 timestamp，匹配冻结的 marketId / yesTokenId 后推导 `YES / NO`。输出默认是 `<report>.outcome.json`，结构由 [`strategy-lab-v2-outcome.schema.json`](../../schemas/strategy-lab-v2-outcome.schema.json) 定义。
+
+评价时间前、checksum 不符、market/token 不符、事件矛盾或同一路径不同输入均拒绝。重复提交完全相同的输入只复用已有 outcome，不重写文件。
+
+## 7. 研究边界
 
 Polymarket last trade 只是预测市场状态 observation，不是保证可获得的执行价。固定 bps 也不是 order book、VWAP、market impact 或真实 fee 模型。
 

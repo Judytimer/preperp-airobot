@@ -519,7 +519,9 @@ Prospective v1 没有产生正式样本，现已冻结并由 v2.1 取代。Prosp
 
 `npm run prospective:discover` 执行一次最小只读发现：查询公开且免认证的 Polymarket Gamma 最新 100 个未关闭市场，归档完整原始响应，并为每个 marketId 只写一次不可覆盖的 first-discovery record。明确出现 `FDV` 或 `fully diluted valuation/value` 的市场只标记为 `POTENTIAL_FDV_REVIEW`；它不会自动填 supply、改变 Strategy 或进入 Risk/Paper/Shadow。默认证据目录是被 Git 忽略的 `work/prospective-v2.1/discovery`。
 
-归档首次发现、Binance Kline 与 Polymarket last-trade 的真实 raw artifacts 后，`npm run strategy-lab:replay -- candidate-v2.1.json observation-v2.1.json reports/prospective-v2.1` 执行 Formal v2.1 链路并原子保存报告。Execution assumption 仍为独立的 `v1.0.0`：主结果双向不利 50 bps、0/100 bps 敏感性、零 fee、全量成交限制。`NO_CANDIDATE` 不触发 Risk/Paper/Shadow；Candidate 才运行原 Risk 与 Paper，Laya 不可用时明确记录失败且不阻塞 Paper。固定 bps 是压力测试，不代表真实盘口可成交价。
+归档首次发现、Binance Kline 与 Polymarket last-trade 的真实 raw artifacts 后，`npm run strategy-lab:replay -- candidate-v2.1.json observation-v2.1.json reports/prospective-v2.1` 执行 Formal v2.1 链路并原子保存报告。Runner 会从 raw artifact 重新解析完整 candle / YES 序列，并要求它们与 observation 审计副本逐项一致；手填数组不能独立成为正式输入。Execution assumption 仍为独立的 `v1.0.0`：主结果双向不利 50 bps、0/100 bps 敏感性、零 fee、全量成交限制。`NO_CANDIDATE` 不触发 Risk/Paper/Shadow；Candidate 才运行原 Risk 与 Paper，Laya 不可用时明确记录失败且不阻塞 Paper。固定 bps 是压力测试，不代表真实盘口可成交价。
+
+冻结评价时间之后，`npm run prospective:outcome -- <report.json> <resolution-artifact.json>` 从归档的 Polymarket `market_resolved` raw event 推导 YES/NO，并写入独立、不可覆盖的 `<report>.outcome.json`；它不会回写 T0 报告，也不接受手填 verdict。
 
 ---
 

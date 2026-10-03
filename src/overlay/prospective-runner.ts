@@ -7,6 +7,10 @@ import type { ExecutionEvent } from "../types.ts";
 import { MemePredictionOverlayBot } from "./bot.ts";
 import { LayaReviewerAdapter } from "./laya-reviewer.ts";
 import {
+  parseBinanceSpotKlines,
+  parsePolymarketLastTrades
+} from "./prospective-artifacts.ts";
+import {
   evaluateProspectiveManifest,
   PROSPECTIVE_EXECUTION_ASSUMPTION_VERSION,
   PROSPECTIVE_PRIMARY_SLIPPAGE_BPS,
@@ -180,11 +184,16 @@ export async function runProspectiveSamplingFiles(
     let report: ProspectiveSamplingReport;
     try {
       await verifyDiscoveryArtifact(manifest, manifestPath);
-      await verifyArtifacts(observation, observationPath, manifest);
-      validateObservationTimeline(observation, manifest, now());
+      const derived = await verifyArtifacts(observation, observationPath, manifest);
+      const boundObservation: ProspectiveObservation = {
+        ...observation,
+        candles: derived.candles,
+        yesPrices: derived.yesPrices
+      };
+      validateObservationTimeline(boundObservation, manifest, now());
       report = await executeObservation(
         manifest,
-        observation,
+        boundObservation,
         inputDigest,
         now,
         dependencies
@@ -544,19 +553,74 @@ async function verifyArtifacts(
   observation: ProspectiveObservation,
   observationPath: string,
   manifest: ProspectiveManifest
-): Promise<void> {
-  artifactByKind(observation, "BINANCE_SPOT_KLINES");
-  artifactByKind(observation, "POLYMARKET_LAST_TRADES");
+): Promise<{
+  readonly candles: readonly ClosedSpotCandle[];
+  readonly yesPrices: readonly TimedYesPrice[];
+}> {
+  const spot = artifactByKind(observation, "BINANCE_SPOT_KLINES");
+  const yes = artifactByKind(observation, "POLYMARKET_LAST_TRADES");
   const base = dirname(resolve(observationPath));
+  const bodies = new Map<RawArtifactKind, Uint8Array>();
   for (const artifact of observation.rawArtifacts) {
     const path = isAbsolute(artifact.path) ? artifact.path : resolve(base, artifact.path);
     const body = await readFile(path);
     const actual = createHash("sha256").update(body).digest("hex");
     if (actual !== artifact.sha256) throw new Error(`${artifact.kind} checksum mismatch`);
+    bodies.set(artifact.kind, body);
   }
   if (manifest.sources.spot.provider !== "BINANCE_SPOT" || manifest.sources.yes.provider !== "POLYMARKET_LAST_TRADE") {
     throw new Error("manifest source providers differ from frozen protocol");
   }
+  const candles = parseBinanceSpotKlines(requireBody(bodies, spot.kind));
+  const yesPrices = parsePolymarketLastTrades(
+    requireBody(bodies, yes.kind),
+    manifest.market.yesTokenId
+  );
+  if (!sameCandles(candles, observation.candles)) {
+    throw new Error("structured candles do not exactly match the archived Binance raw artifact");
+  }
+  if (!sameYesPrices(yesPrices, observation.yesPrices)) {
+    throw new Error("structured YES prices do not exactly match the archived Polymarket raw artifact");
+  }
+  if (candles.at(-1)?.closeTs !== spot.sourceTimestamp) {
+    throw new Error("Binance artifact sourceTimestamp does not equal its final raw candle close");
+  }
+  if (yesPrices.at(-1)?.ts !== yes.sourceTimestamp) {
+    throw new Error("Polymarket artifact sourceTimestamp does not equal its final raw YES trade");
+  }
+  return { candles, yesPrices };
+}
+
+function requireBody(
+  bodies: ReadonlyMap<RawArtifactKind, Uint8Array>,
+  kind: RawArtifactKind
+): Uint8Array {
+  const body = bodies.get(kind);
+  if (body === undefined) throw new Error(`${kind} raw artifact body is missing`);
+  return body;
+}
+
+function sameCandles(
+  left: readonly ClosedSpotCandle[],
+  right: readonly ClosedSpotCandle[]
+): boolean {
+  return left.length === right.length && left.every((value, index) => {
+    const other = right[index];
+    return other !== undefined &&
+      value.openTs === other.openTs &&
+      value.closeTs === other.closeTs &&
+      value.close === other.close;
+  });
+}
+
+function sameYesPrices(
+  left: readonly TimedYesPrice[],
+  right: readonly TimedYesPrice[]
+): boolean {
+  return left.length === right.length && left.every((value, index) => {
+    const other = right[index];
+    return other !== undefined && value.ts === other.ts && value.yesPrice === other.yesPrice;
+  });
 }
 
 function artifactByKind(observation: ProspectiveObservation, kind: RawArtifactKind): RawArtifactEvidence {

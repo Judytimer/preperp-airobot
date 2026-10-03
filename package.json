@@ -17,6 +17,7 @@
     "prospective:discover": "node --experimental-strip-types src/overlay/prospective-discovery.ts",
     "manifest:check": "node --experimental-strip-types src/overlay/prospective-manifest.ts",
     "strategy-lab:replay": "node --env-file-if-exists=.env --experimental-strip-types src/overlay/prospective-runner.ts",
+    "prospective:outcome": "node --experimental-strip-types src/overlay/prospective-outcome.ts",
     "replay": "node --experimental-strip-types src/replay-index.ts",
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },

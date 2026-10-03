@@ -97,6 +97,11 @@ test("checksum mismatch and candle gaps fail closed into a persisted DATA_BLOCKE
   const gapFixture = await createFixture([100, 120, 151]);
   const gapObservation = JSON.parse(await readFile(gapFixture.observationPath, "utf8"));
   gapObservation.candles.splice(1, 1);
+  const gapRaw = JSON.parse(await readFile(gapFixture.spotRawPath, "utf8"));
+  gapRaw.splice(1, 1);
+  const gapRawBody = JSON.stringify(gapRaw);
+  await writeFile(gapFixture.spotRawPath, gapRawBody, "utf8");
+  gapObservation.rawArtifacts[0].sha256 = digest(gapRawBody);
   await writeFile(gapFixture.observationPath, JSON.stringify(gapObservation), "utf8");
   const gapResult = await runProspectiveSamplingFiles(
     gapFixture.manifestPath,
@@ -123,14 +128,55 @@ test("first-discovery raw response checksum mismatch fails closed", async () => 
   assert.match(result.report.blockers.join("\n"), /POLYMARKET_GAMMA_DISCOVERY checksum mismatch/);
 });
 
+test("structured market data cannot diverge from the archived raw artifacts", async () => {
+  const fixture = await createFixture([100, 151]);
+  const value = JSON.parse(await readFile(fixture.observationPath, "utf8"));
+  value.candles[1].close = 999;
+  await writeFile(fixture.observationPath, JSON.stringify(value), "utf8");
+
+  const result = await runProspectiveSamplingFiles(
+    fixture.manifestPath,
+    fixture.observationPath,
+    fixture.reportDirectory,
+    { now: () => 500_000, env: {} }
+  );
+  assert.equal(result.report.status, "DATA_BLOCKED");
+  assert.match(result.report.blockers.join("\n"), /do not exactly match the archived Binance raw artifact/);
+});
+
 async function createFixture(closes: readonly number[]) {
   const directory = await mkdtemp(join(tmpdir(), "prospective-runner-"));
   const rawDiscovery = "raw Polymarket Gamma discovery response";
-  const rawSpot = "raw Binance response";
-  const rawYes = "raw Polymarket response";
+  const series = marketSeries(closes);
+  const rawSpot = JSON.stringify(series.candles.map((candle) => [
+    candle.openTs,
+    String(candle.close),
+    String(candle.close),
+    String(candle.close),
+    String(candle.close),
+    "1",
+    candle.closeTs,
+    "1",
+    1,
+    "1",
+    "1",
+    "0"
+  ]));
+  const rawYes = JSON.stringify(series.yesPrices.map((point) => ({
+    topic: "market",
+    type: "last_trade_price",
+    payload: {
+      market: "CONDITION-1",
+      tokenId: "YES-1",
+      price: String(point.yesPrice),
+      side: "BUY",
+      timestamp: String(point.ts)
+    }
+  })));
+  const spotRawPath = join(directory, "spot.raw.json");
   await Promise.all([
     writeFile(join(directory, "discovery.raw.json"), rawDiscovery, "utf8"),
-    writeFile(join(directory, "spot.raw.json"), rawSpot, "utf8"),
+    writeFile(spotRawPath, rawSpot, "utf8"),
     writeFile(join(directory, "yes.raw.json"), rawYes, "utf8")
   ]);
   const manifestPath = join(directory, "manifest.json");
@@ -138,7 +184,7 @@ async function createFixture(closes: readonly number[]) {
   const reportDirectory = join(directory, "reports");
   await writeFile(manifestPath, JSON.stringify(manifest(rawDiscovery)), "utf8");
   await writeFile(observationPath, JSON.stringify(observation(closes, rawSpot, rawYes)), "utf8");
-  return { manifestPath, observationPath, reportDirectory };
+  return { manifestPath, observationPath, reportDirectory, spotRawPath };
 }
 
 function manifest(rawDiscovery: string) {
@@ -223,16 +269,7 @@ function manifest(rawDiscovery: string) {
 }
 
 function observation(closes: readonly number[], rawSpot: string, rawYes: string) {
-  const candles = closes.map((close, index) => ({
-    openTs: 60_000 + index * 60_000,
-    closeTs: 119_999 + index * 60_000,
-    close
-  }));
-  const yesPrices = [
-    { ts: 90_000, yesPrice: 0.3 },
-    { ts: 150_000, yesPrice: 0.35 },
-    { ts: 210_000, yesPrice: 0.4 }
-  ].filter((point) => point.ts <= candles.at(-1)!.closeTs);
+  const { candles, yesPrices } = marketSeries(closes);
   return {
     schemaVersion: "2.1.0",
     observationId: "SCAN-1",
@@ -258,6 +295,20 @@ function observation(closes: readonly number[], rawSpot: string, rawYes: string)
     candles,
     yesPrices
   };
+}
+
+function marketSeries(closes: readonly number[]) {
+  const candles = closes.map((close, index) => ({
+    openTs: 60_000 + index * 60_000,
+    closeTs: 119_999 + index * 60_000,
+    close
+  }));
+  const yesPrices = [
+    { ts: 90_000, yesPrice: 0.3 },
+    { ts: 150_000, yesPrice: 0.35 },
+    { ts: 210_000, yesPrice: 0.4 }
+  ].filter((point) => point.ts <= candles.at(-1)!.closeTs);
+  return { candles, yesPrices };
 }
 
 function digest(value: string): string {

@@ -81,6 +81,8 @@ FORMAL_1M → NO_CANDIDATE
 
 Formal v1 保留为上市事件的历史方法协议。由于 v1 与短暂设计的 v2.0 均未产生 prospective formal sample，当前 prospective batch 使用 `v2.1.0`：资产须在首次公开发现前已于 Binance Spot 上线，首次发现必须有 Polymarket Gamma 原始响应与 checksum，baseline 是 `firstDiscoveredAt` 后第一根完整 1m candle。`market.openedAt` 仅保存为元数据，不允许把 baseline 倒推至首次发现之前。v1 与 v2.1 不合并统计。
 
+正式 observation 的 candle / YES 数组必须与归档 raw artifact 的确定性解析结果逐项一致，Strategy 使用重新解析的 raw 序列。冻结时间后的 Polymarket resolution 写入独立 append-only outcome record；T0 report 不回写，人工 verdict 不作为正式 outcome。
+
 ```text
 未来 Candidate
 → Baseline 先记录

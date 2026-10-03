@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -84,6 +84,7 @@ export type DiscoveryDependencies = {
   readonly fetcher?: typeof fetch;
   readonly now?: () => number;
   readonly timeoutMs?: number;
+  readonly scanIdFactory?: () => string;
 };
 
 export async function runPolymarketDiscoveryScan(
@@ -93,6 +94,7 @@ export async function runPolymarketDiscoveryScan(
   const fetcher = dependencies.fetcher ?? fetch;
   const now = dependencies.now ?? Date.now;
   const timeoutMs = dependencies.timeoutMs ?? 15_000;
+  const scanIdFactory = dependencies.scanIdFactory ?? randomUUID;
   const localRequestStartedAt = now();
   const response = await fetcher(POLYMARKET_DISCOVERY_SOURCE_URL, {
     headers: { accept: "application/json" },
@@ -119,14 +121,19 @@ export async function runPolymarketDiscoveryScan(
   const digest = sha256(raw);
   const root = resolve(outputDirectory);
   const rawPath = resolve(root, "raw", `${retrievedAt}-${digest.slice(0, 16)}.json`);
+
+  // Validate the complete provider payload before publishing any first-discovery
+  // record. A malformed later row must not leave a partially admitted scan.
+  const parsedMarkets = payload.map((value) =>
+    parseMarket(value, retrievedAt, rawPath, root, digest, acquisitionClock)
+  );
   await writeImmutable(rawPath, raw);
 
   const markets: Array<DiscoveryScanRecord["markets"][number]> = [];
   let newDiscoveries = 0;
   let potentialFdvReviews = 0;
   let blockedDiscoveries = 0;
-  for (const value of payload) {
-    const parsed = parseMarket(value, retrievedAt, rawPath, root, digest, acquisitionClock);
+  for (const parsed of parsedMarkets) {
     const recordPath = resolve(root, "markets", `${safeSegment(parsed.marketId)}.json`);
     const existing = await readDiscovery(recordPath);
     let record: MarketDiscoveryRecord;
@@ -153,7 +160,8 @@ export async function runPolymarketDiscoveryScan(
     });
   }
 
-  const scanId = `${retrievedAt}-${digest.slice(0, 16)}`;
+  const scanNonce = safeSegment(scanIdFactory());
+  const scanId = `${retrievedAt}-${scanNonce}`;
   const scanPath = resolve(root, "scans", `${scanId}.json`);
   const scan: DiscoveryScanRecord = {
     schemaVersion: PROSPECTIVE_DISCOVERY_SCHEMA_VERSION,
@@ -171,7 +179,8 @@ export async function runPolymarketDiscoveryScan(
     blockedDiscoveries,
     markets
   };
-  await writeAtomic(scanPath, `${JSON.stringify(scan, null, 2)}\n`);
+  const created = await writeImmutable(scanPath, `${JSON.stringify(scan, null, 2)}\n`);
+  if (!created) throw new Error(`discovery scan id collision: ${scanId}`);
   return { scanPath, rawPath, scan };
 }
 
@@ -289,18 +298,6 @@ async function writeImmutable(path: string, body: string): Promise<boolean> {
     throw error;
   } finally {
     await handle?.close();
-  }
-}
-
-async function writeAtomic(path: string, body: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    await writeFile(temporaryPath, body, "utf8");
-    await rename(temporaryPath, path);
-  } catch (error) {
-    await rm(temporaryPath, { force: true });
-    throw error;
   }
 }
 

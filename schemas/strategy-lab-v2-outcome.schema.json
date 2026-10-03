@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Judytimer/preperp-airobot/schemas/strategy-lab-v2-outcome.schema.json",
+  "title": "Strategy Lab v2.1 Prospective Outcome",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "mode", "status", "manifestId", "observationId", "recordedAt",
+    "reportInputDigest", "reportSha256", "inputDigest", "measurementAt", "rule",
+    "rulesUrl", "result", "source", "resolution"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "2.1.0" },
+    "mode": { "const": "PROSPECTIVE_OUTCOME" },
+    "status": { "const": "MEASURED" },
+    "manifestId": { "type": "string", "minLength": 1 },
+    "observationId": { "type": "string", "minLength": 1 },
+    "recordedAt": { "$ref": "#/$defs/timestamp" },
+    "reportInputDigest": { "$ref": "#/$defs/sha256" },
+    "reportSha256": { "$ref": "#/$defs/sha256" },
+    "inputDigest": { "$ref": "#/$defs/sha256" },
+    "measurementAt": { "$ref": "#/$defs/timestamp" },
+    "rule": { "type": "string", "minLength": 1 },
+    "rulesUrl": { "type": "string", "pattern": "^https://" },
+    "result": { "enum": ["YES", "NO"] },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "provider", "sourceUrl", "sourceTimestamp", "retrievedAt", "rawResponsePath", "sha256"],
+      "properties": {
+        "schemaVersion": { "const": "2.1.0" },
+        "provider": { "const": "POLYMARKET_MARKET_RESOLVED" },
+        "sourceUrl": { "const": "wss://ws-subscriptions-clob.polymarket.com/ws/market" },
+        "sourceTimestamp": { "$ref": "#/$defs/timestamp" },
+        "retrievedAt": { "$ref": "#/$defs/timestamp" },
+        "rawResponsePath": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["marketId", "yesTokenId", "winningTokenId", "winningOutcome", "sourceTimestamp", "result"],
+      "properties": {
+        "marketId": { "type": "string", "minLength": 1 },
+        "yesTokenId": { "type": "string", "minLength": 1 },
+        "winningTokenId": { "type": "string", "minLength": 1 },
+        "winningOutcome": { "type": ["string", "null"] },
+        "sourceTimestamp": { "$ref": "#/$defs/timestamp" },
+        "result": { "enum": ["YES", "NO"] }
+      }
+    }
+  },
+  "$defs": {
+    "timestamp": { "type": "number", "minimum": 0 },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
