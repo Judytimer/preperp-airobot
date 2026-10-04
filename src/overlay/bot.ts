@@ -103,7 +103,12 @@ export class MemePredictionOverlayBot {
       // Current SHADOW safety boundary: AI reviews entries only and has no execution
       // authority. Deterministic exits bypass review; this is not a permanent strategy rule.
     }
-    const decision = this.risk.evaluate(signal, projectedShares);
+    const executionPrice = stressedFillPrice(
+      signal.yesPrice,
+      signal.action === "SELL_YES" ? "SELL" : "BUY",
+      this.slippageBps
+    );
+    const decision = this.risk.evaluate({ ...signal, yesPrice: executionPrice }, projectedShares);
     this.logger(formatOverlayRisk(decision));
     if (!decision.approved) {
       return;
@@ -111,13 +116,10 @@ export class MemePredictionOverlayBot {
 
     const clientOrderId = `OVERLAY-${this.nextClientOrderId++}`;
     const submitAt = Date.now();
-    const executionOrder = {
-      ...decision.order,
-      price: stressedFillPrice(decision.order.price, decision.order.side, this.slippageBps)
-    };
+    const executionOrder = decision.order;
     this.pendingOrders.set(clientOrderId, {
       order: executionOrder,
-      referencePrice: decision.order.price,
+      referencePrice: signal.yesPrice,
       slippageBps: this.slippageBps,
       signalAt: decision.order.ts,
       submitAt

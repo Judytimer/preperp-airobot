@@ -161,6 +161,8 @@ feeModel = ZERO (explicit)
 
 Prospective batch 的 execution assumptions 已冻结为 `v1.0.0`：主报告使用双向不利 `50 bps`，同时保存 `0 / 100 bps` 敏感性对照；fee 显式为零，fill 明示为全量成交限制。修改这些数值必须切换 assumption version / batch，不能回改已经落盘的 observation。
 
+BUY 场景按不利滑点后的 `fillPrice` 计算可买份额，而不是先按 observation price 用满预算后再把成交价抬高；因此滑点会降低 shares 并进入 Position/PnL，同时实际 entry premium 仍不超过冻结的 `maxRiskBudget`。SELL 场景同样以不利 `fillPrice` 进入已实现 PnL。
+
 这里的 `feeModel = ZERO` 是公开假设，不代表任何 prediction venue 实际免手续费。进入指定 venue 验证前，必须换成该 venue 的 entry / exit / network fee 规则。
 
 ### 8.2 Known Limitation（记录，不在本轮伪造精度）
