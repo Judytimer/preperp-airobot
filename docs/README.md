@@ -41,6 +41,7 @@
 
 ## AI 与策略验证
 
+- [Strategy Thesis × Variant × Formal Batch：策略边界纠偏说明](research/strategy-thesis-boundary-correction.md) — 先分清“上层研究假设、当前具体策略、当前冻结实验批次”，避免把 Crypto-FDV v2.1 误当成整个策略定义。
 - [AI Shadow 研究边界](research/ai-shadow.md)
 - [验证方法：Historical Replay / FORMAL / Prospective](research/validation-methodology.md)
 - [Strategy Lab 收尾：Formal 1m Protocol × PENGU](research/strategy-lab-closeout.md)
