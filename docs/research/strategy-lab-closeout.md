@@ -3,6 +3,8 @@
 日期：2026-10-02  
 状态：**本阶段收尾；下一阶段只做冻结协议后的 prospective sampling**
 
+> **2026-10-04 Scope 纠偏：** 本文冻结的是首个 Crypto-FDV Variant 的方法与证据协议，不定义整个 Strategy Thesis。Meme、FDV、Binance Spot 与 Polymarket FDV 都属于当前具体 Variant / Formal Batch 的边界。上层研究命题现明确为 `Cross-Market Repricing Lag`；v2.1 继续冻结，不因上层概念变宽而回改。详见 [策略边界纠偏说明](strategy-thesis-boundary-correction.md)。
+
 ## 1. 这轮真正闭合的东西
 
 Strategy 没有为了历史案例改参数或改语义。
