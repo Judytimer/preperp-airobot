@@ -480,13 +480,24 @@ Reconciliation
 
 ## AI 策略研究
 
-项目还包含一个实验性：
+上层研究命题现在明确区分为：
 
 ```text
-Meme + Prediction Overlay
+Strategy Thesis
+Cross-Market Repricing Lag
+        ↓
+Current Concrete Variant
+Crypto FDV Prediction Overlay
+        ↓
+Current Formal Batch
+Strategy Lab v2.1
 ```
 
-当 Meme asset 已明显上涨时，策略不会继续追高现货，而是在固定最大风险预算下模拟购买更高 FDV 目标对应的 Prediction YES。
+这里的上层假设是：当底层市场已经对新信息产生明显重新定价时，与同一经济命题相关的 Prediction Market 可能存在概率重新定价滞后；如果这种滞后存在，可以研究是否用固定最大亏损的 Prediction YES 暴露替代继续追高底层资产。
+
+**当前仓库真正实现并冻结验证的仍然只是 Crypto FDV Variant。** 历史类名 `MemePredictionOverlayStrategy` 保留，不代表 Meme 是整个 Strategy Thesis 的永久资产限制；FDV、Binance Spot、Polymarket 与 1m cadence 也属于当前具体 Variant / Formal Batch 的边界，不应外推成所有未来研究对象的定义。
+
+当前具体实现中，当 Crypto asset 已明显上涨时，策略不会继续追高现货，而是在固定最大风险预算下模拟购买更高 FDV 目标对应的 Prediction YES。
 
 Prediction Market 与 Perpetual Futures 保持独立业务语义，不存在：
 
@@ -515,7 +526,7 @@ Strategy Lab 的正式 Candidate admission 已冻结为 `v1.0.0`：使用 **1 �
 
 Historical Replay 是一个**有限的诊断阶段**，不是永久运行的研究主线。当前协议冻结后，主线转向 **Prospective Sampling（前瞻采样）**：只有未来样本暴露新的方法问题、数据泄漏或不可复现行为时，才重新打开历史研究，而不会为了增加样本数量持续寻找历史案例。
 
-Prospective v1 没有产生正式样本，现已冻结并由 v2.1 取代。Prospective v2.1 允许已经在 Binance Spot 上线的加密资产；它以归档的 Polymarket Gamma 首次公开发现时间作为不可回填的边界，baseline 固定为该时间之后第一根完整 1m candle。Polymarket 市场开放时间只保留为证据字段。`npm run manifest:check -- path/to/candidate-v2.1.json` 只做 admission，输出 `DATA_READY / DATA_BLOCKED / INELIGIBLE`，不会抓行情、调用 Strategy 或触发交易。详见 [Strategy Lab v2.1 Prospective Manifest](docs/research/prospective-manifest-v2.md)。
+Prospective v1 没有产生正式样本，现已冻结并由 v2.1 取代。**v2.1 只定义当前 Crypto-FDV Variant 的 prospective batch，不定义整个 Cross-Market Repricing Thesis。** Prospective v2.1 允许已经在 Binance Spot 上线的加密资产；它以归档的 Polymarket Gamma 首次公开发现时间作为不可回填的边界，baseline 固定为该时间之后第一根完整 1m candle。Polymarket 市场开放时间只保留为证据字段。`npm run manifest:check -- path/to/candidate-v2.1.json` 只做 admission，输出 `DATA_READY / DATA_BLOCKED / INELIGIBLE`，不会抓行情、调用 Strategy 或触发交易。详见 [Strategy Lab v2.1 Prospective Manifest](docs/research/prospective-manifest-v2.md)。
 
 `npm run prospective:discover` 执行一次最小只读发现：查询公开且免认证的 Polymarket Gamma 最新 100 个未关闭市场，归档完整原始响应，并为每个 marketId 只写一次不可覆盖的 first-discovery record。明确出现 `FDV` 或 `fully diluted valuation/value` 的市场只标记为 `POTENTIAL_FDV_REVIEW`；它不会自动填 supply、改变 Strategy 或进入 Risk/Paper/Shadow。默认证据目录是被 Git 忽略的 `work/prospective-v2.1/discovery`。
 
