@@ -117,6 +117,8 @@ test("paper execution records adverse fixed-bps slippage, zero fees, and timesta
   assert.equal(exit.fillPrice, 0.7425);
   assert.equal(entry.slippageBps, 100);
   assert.equal(entry.fee, 0);
+  assert.ok(bot.getPositionRecords()[0]!.premiumAtRisk <= 100);
+  assert.ok(bot.getPosition().realizedPnl > 0);
   assert.ok(entry.signalAt <= entry.submitAt);
   assert.ok(entry.submitAt <= entry.fillAt);
 });
