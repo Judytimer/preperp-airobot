@@ -3,9 +3,20 @@ import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const POLYMARKET_DISCOVERY_SOURCE_URL =
+export const POLYMARKET_LEGACY_DISCOVERY_SOURCE_URL =
   "https://gamma-api.polymarket.com/markets?closed=false&limit=100&order=createdAt&ascending=false";
-export const PROSPECTIVE_DISCOVERY_SCHEMA_VERSION = "2.1.0";
+export const POLYMARKET_DISCOVERY_SOURCE_URL =
+  "https://gamma-api.polymarket.com/public-search?q=FDV&limit_per_type=50&events_status=active&page=1";
+export const POLYMARKET_CRYPTO_TAG_ID = "21";
+export const PROSPECTIVE_DISCOVERY_SCHEMA_VERSION = "2.1.1";
+export const PROSPECTIVE_DISCOVERY_LEGACY_SCHEMA_VERSION = "2.1.0";
+
+type DiscoverySchemaVersion =
+  | typeof PROSPECTIVE_DISCOVERY_SCHEMA_VERSION
+  | typeof PROSPECTIVE_DISCOVERY_LEGACY_SCHEMA_VERSION;
+type DiscoverySourceUrl =
+  | typeof POLYMARKET_DISCOVERY_SOURCE_URL
+  | typeof POLYMARKET_LEGACY_DISCOVERY_SOURCE_URL;
 
 export type DiscoveryDisposition =
   | "POTENTIAL_FDV_REVIEW"
@@ -13,7 +24,7 @@ export type DiscoveryDisposition =
   | "DATA_BLOCKED";
 
 export type MarketDiscoveryRecord = {
-  readonly schemaVersion: typeof PROSPECTIVE_DISCOVERY_SCHEMA_VERSION;
+  readonly schemaVersion: DiscoverySchemaVersion;
   readonly marketId: string;
   readonly question: string;
   readonly slug: string | null;
@@ -33,7 +44,7 @@ export type MarketDiscoveryRecord = {
   readonly discovery: {
     readonly provider: "POLYMARKET_GAMMA";
     readonly firstDiscoveredAt: number;
-    readonly sourceUrl: typeof POLYMARKET_DISCOVERY_SOURCE_URL;
+    readonly sourceUrl: DiscoverySourceUrl;
     readonly sourceTimestamp: number | null;
     readonly retrievedAt: number;
     readonly rawResponsePath: string;
@@ -50,7 +61,7 @@ export type MarketDiscoveryRecord = {
 
 export type DiscoveryScanRecord = {
   readonly schemaVersion: typeof PROSPECTIVE_DISCOVERY_SCHEMA_VERSION;
-  readonly mode: "POLYMARKET_GAMMA_DISCOVERY";
+  readonly mode: "POLYMARKET_GAMMA_FDV_CRYPTO_DISCOVERY";
   readonly scanId: string;
   readonly sourceUrl: typeof POLYMARKET_DISCOVERY_SOURCE_URL;
   readonly retrievedAt: number;
@@ -58,8 +69,8 @@ export type DiscoveryScanRecord = {
   readonly sha256: string;
   readonly acquisitionClock: MarketDiscoveryRecord["acquisitionClock"];
   readonly coverage: {
-    readonly ordering: "createdAt DESC";
-    readonly limit: 100;
+    readonly ordering: "POLYMARKET_SEARCH_RELEVANCE";
+    readonly limit: 50;
     readonly exhaustive: false;
   };
   readonly observedMarkets: number;
@@ -117,7 +128,7 @@ export async function runPolymarketDiscoveryScan(
     localResponseReceivedAt,
     midpointOffsetMs: sourceDate - ((localRequestStartedAt + localResponseReceivedAt) / 2)
   };
-  const payload = parseMarketArray(raw);
+  const payload = parseFdvCryptoSearch(raw);
   const digest = sha256(raw);
   const root = resolve(outputDirectory);
   const rawPath = resolve(root, "raw", `${retrievedAt}-${digest.slice(0, 16)}.json`);
@@ -165,14 +176,14 @@ export async function runPolymarketDiscoveryScan(
   const scanPath = resolve(root, "scans", `${scanId}.json`);
   const scan: DiscoveryScanRecord = {
     schemaVersion: PROSPECTIVE_DISCOVERY_SCHEMA_VERSION,
-    mode: "POLYMARKET_GAMMA_DISCOVERY",
+    mode: "POLYMARKET_GAMMA_FDV_CRYPTO_DISCOVERY",
     scanId,
     sourceUrl: POLYMARKET_DISCOVERY_SOURCE_URL,
     retrievedAt,
     rawResponsePath: relative(dirname(scanPath), rawPath).replaceAll("\\", "/"),
     sha256: digest,
     acquisitionClock,
-    coverage: { ordering: "createdAt DESC", limit: 100, exhaustive: false },
+    coverage: { ordering: "POLYMARKET_SEARCH_RELEVANCE", limit: 50, exhaustive: false },
     observedMarkets: payload.length,
     newDiscoveries,
     potentialFdvReviews,
@@ -249,16 +260,30 @@ function parseMarket(
   };
 }
 
-function parseMarketArray(raw: string): readonly unknown[] {
+function parseFdvCryptoSearch(raw: string): readonly unknown[] {
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
     throw new Error("Polymarket Gamma discovery response is not valid JSON");
   }
-  if (!Array.isArray(value)) throw new Error("Polymarket Gamma discovery response must be an array");
-  if (value.length > 100) throw new Error("Polymarket Gamma discovery response exceeds frozen limit");
-  return value;
+  if (!isRecord(value) || !Array.isArray(value.events)) {
+    throw new Error("Polymarket Gamma FDV search response must contain an events array");
+  }
+  if (value.events.length > 50) throw new Error("Polymarket Gamma FDV search exceeds frozen event limit");
+
+  const markets: unknown[] = [];
+  for (const event of value.events) {
+    if (!isRecord(event) || !Array.isArray(event.tags) || !Array.isArray(event.markets)) {
+      throw new Error("Polymarket Gamma FDV search contains a malformed event");
+    }
+    const isCrypto = event.tags.some((tag) =>
+      isRecord(tag) && String(tag.id) === POLYMARKET_CRYPTO_TAG_ID
+    );
+    if (!isCrypto) continue;
+    markets.push(...event.markets);
+  }
+  return markets;
 }
 
 async function readDiscovery(path: string): Promise<MarketDiscoveryRecord | null> {
@@ -266,10 +291,11 @@ async function readDiscovery(path: string): Promise<MarketDiscoveryRecord | null
     const value = JSON.parse(await readFile(path, "utf8"));
     if (
       !isRecord(value) ||
-      value.schemaVersion !== PROSPECTIVE_DISCOVERY_SCHEMA_VERSION ||
+      !isDiscoverySchemaVersion(value.schemaVersion) ||
       !nonEmptyString(value.marketId) ||
       !isRecord(value.discovery) ||
-      !nonNegativeFinite(value.discovery.firstDiscoveredAt)
+      !nonNegativeFinite(value.discovery.firstDiscoveredAt) ||
+      !isDiscoverySourceUrl(value.discovery.sourceUrl)
     ) {
       throw new Error("invalid discovery record");
     }
@@ -333,6 +359,16 @@ function nonEmptyString(value: unknown): value is string {
 
 function nonNegativeFinite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isDiscoverySchemaVersion(value: unknown): value is DiscoverySchemaVersion {
+  return value === PROSPECTIVE_DISCOVERY_SCHEMA_VERSION ||
+    value === PROSPECTIVE_DISCOVERY_LEGACY_SCHEMA_VERSION;
+}
+
+function isDiscoverySourceUrl(value: unknown): value is DiscoverySourceUrl {
+  return value === POLYMARKET_DISCOVERY_SOURCE_URL ||
+    value === POLYMARKET_LEGACY_DISCOVERY_SOURCE_URL;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

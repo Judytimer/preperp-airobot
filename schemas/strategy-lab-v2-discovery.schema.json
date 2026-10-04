@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Judytimer/preperp-airobot/schemas/strategy-lab-v2-discovery.schema.json",
-  "title": "Strategy Lab v2.1 Polymarket First Discovery Record",
+  "title": "Strategy Lab v2.1.x Polymarket First Discovery Record",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "marketId", "question", "slug", "disposition", "reason", "registeredAt", "market", "discovery", "acquisitionClock"],
   "properties": {
-    "schemaVersion": { "const": "2.1.0" },
+    "schemaVersion": { "enum": ["2.1.0", "2.1.1"] },
     "marketId": { "type": "string", "minLength": 1 },
     "question": { "type": "string", "minLength": 1 },
     "slug": { "type": ["string", "null"] },
@@ -35,7 +35,12 @@
       "properties": {
         "provider": { "const": "POLYMARKET_GAMMA" },
         "firstDiscoveredAt": { "$ref": "#/$defs/timestamp" },
-        "sourceUrl": { "const": "https://gamma-api.polymarket.com/markets?closed=false&limit=100&order=createdAt&ascending=false" },
+        "sourceUrl": {
+          "enum": [
+            "https://gamma-api.polymarket.com/markets?closed=false&limit=100&order=createdAt&ascending=false",
+            "https://gamma-api.polymarket.com/public-search?q=FDV&limit_per_type=50&events_status=active&page=1"
+          ]
+        },
         "sourceTimestamp": { "$ref": "#/$defs/nullableTimestamp" },
         "retrievedAt": { "$ref": "#/$defs/timestamp" },
         "rawResponsePath": { "type": "string", "minLength": 1 },

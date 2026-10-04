@@ -81,7 +81,7 @@ npm run manifest:check -- candidate-v2.1.json
 
 ## 4. 最小只读发现
 
-官方 Gamma API 的市场列表是公开、免认证数据源，字段包括 `createdAt`、`updatedAt`、`startDate`、`acceptingOrdersTimestamp` 和市场状态。接口依据见 [Discover Markets](https://docs.polymarket.com/market-data/discover-markets) 与 [List markets](https://docs.polymarket.com/api-reference/markets/list-markets)。
+官方 Gamma API 是公开、免认证数据源。Discovery source patch `v2.1.1` 只改变候选发现覆盖率，不改变 Manifest、Formal 1m、T0 freeze 或 Strategy。接口依据见 [Search markets, events and profiles](https://docs.polymarket.com/api-reference/search/search-markets-events-and-profiles) 与 [Get tag by slug](https://gamma-api.polymarket.com/tags/slug/crypto)。
 
 ```bash
 npm run prospective:discover
@@ -89,19 +89,20 @@ npm run prospective:discover
 
 该命令只执行一次有界扫描：
 
-- 固定读取按 `createdAt DESC` 排列的最新 100 个未关闭市场，不声称覆盖 Polymarket 全量历史；
+- ACTIVE source 固定读取 `public-search?q=FDV&limit_per_type=50&events_status=active&page=1`，只处理带 Crypto `tag_id=21` 的 events，并将其中 markets 展平后交给原 market parser；第一页是有界、非穷尽覆盖，不声称覆盖 Polymarket 全量历史；
+- v2.1.0 的 latest-100 general markets URL 继续作为 LEGACY evidence allowlist；旧 raw、market record、`firstDiscoveredAt` 和 SHA-256 永不回写或失效；
 - 完整原样保存 Gamma 响应、retrievedAt 与 SHA-256；`retrievedAt` 使用响应的 Polymarket HTTP `Date`，同时记录本机请求起止时间与 midpoint offset，避免本机时钟偏差制造 future-data 假象；
 - 每个 marketId 首次出现时，以不可覆盖文件冻结 `registeredAt === firstDiscoveredAt === retrievedAt`；
 - 重复抓取保留原 first-discovery record，不重复登记；
 - 每次扫描使用独立 scanId 且 scan summary 只允许首次创建；相同 ID 冲突时拒绝，禁止覆盖旧扫描；
-- 完整 Gamma payload 会先全部解析成功，再发布 raw、market 与 scan 文件；畸形的后续 market 不得留下半次扫描；
+- 完整 Gamma search payload 会先校验 events/tags/markets，再发布 raw、market 与 scan 文件；非 Crypto event 被忽略，畸形的 Crypto event 或 market 不得留下半次扫描；
 - 只有明确含 `FDV` 或 `fully diluted valuation/value` 的文本进入 `POTENTIAL_FDV_REVIEW`；普通 `market cap` 不自动等同 FDV；
 - 缺少关键时间或出现未来 `updatedAt` 时记录 `DATA_BLOCKED`；
 - 不读取 API key，不运行 Strategy、Risk、Paper 或 Shadow，也不自动补 supply/token/outcome 字段。
 
 默认输出位于 `work/prospective-v2.1/discovery`，其中 `raw/` 保存原始响应，`markets/` 保存不可覆盖的首次发现记录，`scans/` 保存每次扫描摘要。该目录被 Git 忽略，真实证据不得提交进源码仓库。
 
-发现记录结构由 [`strategy-lab-v2-discovery.schema.json`](../../schemas/strategy-lab-v2-discovery.schema.json) 定义。`POTENTIAL_FDV_REVIEW` 仍不是 Candidate；必须完成 v2.1 manifest admission 后才能采集 Formal observation。
+发现记录继续使用同一个 [`strategy-lab-v2-discovery.schema.json`](../../schemas/strategy-lab-v2-discovery.schema.json)。该 schema 同时接受 LEGACY `2.1.0` 与 ACTIVE `2.1.1` source evidence，不存在第二套 evidence schema。`POTENTIAL_FDV_REVIEW` 仍不是 Candidate；必须完成 v2.1 manifest admission 后才能采集 Formal observation。
 
 ## 5. Observation 与报告
 
