@@ -3,6 +3,24 @@
 日期：2026-10-02
 状态：**FROZEN / WAITING_FOR_QUALIFIED_MARKET**
 
+## 0. Scope：v2.1 是 Formal Batch，不是整个 Strategy
+
+v2.1 只负责当前 **Crypto FDV Prediction Overlay** 的 prospective admission 与证据协议。
+
+它不定义整个上层 Strategy Thesis。上层研究命题当前表述为 **Cross-Market Repricing Lag**；未来如果出现 Crypto Price Target、Equity Valuation 或其他不同 contract semantics，必须新建语义明确的 Variant / Protocol，而不是把不同含义硬塞进 v2.1 的 `targetFdv`。
+
+因此本文中的：
+
+- Binance Spot；
+- FDV / verified totalSupply；
+- Polymarket FDV threshold；
+- 1m fully-closed candle；
+- FDV keyword discovery；
+
+都属于**当前 Formal Batch 的冻结边界**，不是所有未来 Variant 的永久限制。
+
+v2.1 继续保持冻结，不因为上层 Thesis 变宽而回改 admission。完整纠偏依据见 [Strategy Thesis × Variant × Formal Batch：策略边界纠偏说明](strategy-thesis-boundary-correction.md)。
+
 ## 1. 为什么是 v2.1
 
 v1 将研究对象限制为尚未上市的 Meme token，并以上市后的第一根完整 1m candle 为 baseline。v1 尚未产生正式样本，因此不回改 v1。v2.0 曾计划允许已经在 Binance Spot 上线的加密资产，并使用 Polymarket 市场开放时间作为 baseline；但公开 API 不保证市场在开放前可被发现，v2.0 在产生任何正式样本前被 v2.1 取代。
