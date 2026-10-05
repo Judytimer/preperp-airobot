@@ -1,7 +1,7 @@
 # Concrete Variant 2：Crypto Price-Target Feasibility
 
 日期：2026-10-05
-状态：**DESIGN RESEARCH / NOT FROZEN / NO EXECUTION AUTHORITY**
+状态：**FEASIBILITY COMPLETE / ADMISSION v1 FROZEN / NO EXECUTION AUTHORITY**
 
 ## 1. 为什么允许启动这项设计研究
 
@@ -77,31 +77,38 @@ BTC above 78k
 ...
 ```
 
-它们共享 asset、measurement time 和底层价格路径，不能按多个独立 Candidate 计数。未来协议必须冻结：
+它们共享 asset、measurement time 和底层价格路径，不能按多个独立 Candidate 计数。Admission v1 已冻结：
 
 ```text
 one asset × one measurement episode
 = one independent sampling opportunity
 ```
 
-还必须在看到后续结果前冻结唯一 contract-selection rule，例如 discovery T0 时的 nearest-ATM / nearest-OTM strike；不得事后从同一 strike ladder 挑表现最好的市场。
+唯一 contract-selection rule 已在看到后续结果前固定为首次发现时的 nearest-OTM ABOVE strike；不得事后从同一 strike ladder 挑表现最好的市场。
 
-## 5. 尚未解决、因此不能冻结 Variant 2 的问题
+## 5. Admission 设计结论
 
-1. Candidate T0 的 cross-market repricing trigger 与 lookback 尚未定义。
-2. 同一 measurement episode 的唯一 strike selection 尚未定义。
-3. YES latest-known、spread/liquidity admission 与 raw artifact 来源尚未冻结。
-4. BTC、ETH、SOL 是各自独立 cohort，还是共享一个 economic mechanism，尚无证据支持合并。
-5. recurring event 的 first-discovery 与 measurementAt 最小安全间隔尚未冻结。
-6. 原策略真钱语义仍是 Prediction `BUY_YES`；这项设计研究不会把它自动改写成 Perp LONG/SHORT。
+后续协议设计已经在结果出现前冻结为 [Price-Target Admission Protocol v1.0.0](price-target-variant-admission-v1.md)：
+
+1. episode 使用 `asset + resolution venue/symbol + measurementAt` 去重；
+2. BTC、ETH、SOL 使用同一 admission mechanism，但保持三个独立 cohort；
+3. 首次发现时按最后完整 Binance Spot 1m close 选择唯一 nearest-OTM ABOVE strike；
+4. Candidate trigger 是选定 strike 的第一次 1m close upward crossing；
+5. Candidate T0 固定为 crossing candle 完整收盘后的下一个分钟边界；
+6. `T0 + 4h < measurementAt` 是不可放宽的安全条件；
+7. T0 只接受不晚于 T0 且最多陈旧 120 秒的已归档 YES order book；
+8. selected strike 不得因数据缺失、流动性或后续结果而切换；
+9. 原策略仍是 Prediction `BUY_YES`，不自动映射成 Perp LONG/SHORT。
+
+协议 v1 已冻结，但 collector、manifest、schema 和 evaluator 尚未实现，因此 Variant 2 仍未开始收集 evidence。
 
 ## 6. 当前 verdict
 
 ```text
 MARKET_SUPPLY_FEASIBLE
-→ CONTINUE PROTOCOL DESIGN
+→ ADMISSION PROTOCOL v1.0.0 FROZEN
+→ NOT COLLECTING
 → DO NOT IMPLEMENT EXECUTION
-→ DO NOT FREEZE VARIANT 2 YET
 ```
 
-只有上述语义与 selection 问题在结果出现前得到明确答案，才能另开版本冻结 Variant 2 的 prospective admission。它将拥有独立 manifest、独立 cohort 和独立 Directional Study；不得与 FDV v2.1.1 的 0/10 混合累计。
+Variant 2 将拥有独立 manifest、独立 cohort 和独立 Directional Study；不得与 FDV v2.1.1 的 0/10 混合累计。下一阶段只有在明确开启后，才实现这份 admission contract；本轮不写 collector 或交易代码。

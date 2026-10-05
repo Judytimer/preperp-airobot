@@ -541,7 +541,7 @@ TradeCandidate
 
 `Directional Study v1.1.0` 已预注册为分级授权：首 3 个 qualified prospective Candidates 只冻结 provisional direction，并最多解锁 strategy-generated Testnet 的显式审核；完整 10 个样本才运行原 70% formal gate，并最多解锁 Micro-Capital 审核。任何 stage 都不自动生成 `PerpIntent` 或下单；1h、YES change、funding 与 `measurementAt` 仍只独立报告。详见 [Directional Study v1.1](docs/research/directional-study-v1.md)。
 
-首次真实 FDV discovery 的 `426 observed / 33 new potential / 0 qualified` 已构成启动第二 Concrete Variant 设计研究的证据。当前只确认 BTC/ETH/SOL fixed-time price-threshold markets 的 prospective 供给明显更高，并冻结“同一 asset × measurement episode 只能算一个独立采样机会”的研究约束；Variant 2 尚未冻结，也没有执行权限。详见 [Crypto Price-Target Feasibility](docs/research/price-target-variant-feasibility.md)。
+首次真实 FDV discovery 的 `426 observed / 33 new potential / 0 qualified` 已构成启动第二 Concrete Variant 设计研究的证据。BTC/ETH/SOL fixed-time price-threshold markets 的 prospective 供给明显更高；Variant 2 admission v1.0.0 现已冻结为“同一 asset × measurement episode 一个机会、首次发现锁定 nearest-OTM strike、第一次 1m close upward crossing 定义 Candidate T0”。它仍是 `NOT COLLECTING / NO EXECUTION AUTHORITY`，没有 collector 或交易代码。详见 [Crypto Price-Target Feasibility](docs/research/price-target-variant-feasibility.md) 与 [Price-Target Admission Protocol v1.0.0](docs/research/price-target-variant-admission-v1.md)。
 
 当前 AI 只运行于 Shadow Mode。
 
