@@ -1,17 +1,21 @@
 import { round } from "./math.ts";
 
-export const DIRECTIONAL_STUDY_PROTOCOL_VERSION = "1.0.0" as const;
+export const DIRECTIONAL_STUDY_PROTOCOL_VERSION = "1.1.0" as const;
 export const DIRECTIONAL_STUDY_QUALIFICATION =
   "STRATEGY_LAB_V2_1_1_QUALIFIED_PROSPECTIVE_CANDIDATE" as const;
 export const DIRECTIONAL_STUDY_SECONDARY_HORIZON_MS = 60 * 60_000;
 export const DIRECTIONAL_STUDY_PRIMARY_HORIZON_MS = 4 * 60 * 60_000;
+export const DIRECTIONAL_STUDY_PROVISIONAL_SAMPLE_SIZE = 3;
 export const DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE = 10;
+export const DIRECTIONAL_STUDY_PROVISIONAL_MIN_HIT_RATE = 2 / 3;
 export const DIRECTIONAL_STUDY_MIN_HIT_RATE = 0.7;
 
 export const DIRECTIONAL_STUDY_V1 = Object.freeze({
   protocolVersion: DIRECTIONAL_STUDY_PROTOCOL_VERSION,
   primaryHorizonMs: DIRECTIONAL_STUDY_PRIMARY_HORIZON_MS,
   secondaryHorizonMs: DIRECTIONAL_STUDY_SECONDARY_HORIZON_MS,
+  provisionalSampleSize: DIRECTIONAL_STUDY_PROVISIONAL_SAMPLE_SIZE,
+  provisionalMinimumHitRate: DIRECTIONAL_STUDY_PROVISIONAL_MIN_HIT_RATE,
   primarySampleSize: DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE,
   minimumPrimaryHitRate: DIRECTIONAL_STUDY_MIN_HIT_RATE,
   primaryGateUsesFunding: false,
@@ -82,36 +86,54 @@ export type DirectionalSampleScore = {
   readonly measurementYesChange: number | null;
 };
 
-export type DirectionalStudyResult =
-  | {
-      readonly status: "COLLECTING";
-      readonly outcome: null;
-      readonly sampleCount: number;
-      readonly requiredSampleCount: typeof DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE;
-      readonly samples: readonly DirectionalSampleScore[];
-    }
-  | {
-      readonly status: "EVALUATED";
-      readonly outcome:
-        | "DIRECTIONAL_LONG_SUPPORTED"
-        | "DIRECTIONAL_SHORT_SUPPORTED"
-        | "NO_DIRECTIONAL_EVIDENCE";
-      readonly sampleCount: typeof DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE;
-      readonly requiredSampleCount: typeof DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE;
-      readonly long: DirectionMetrics;
-      readonly short: DirectionMetrics;
-      readonly samples: readonly DirectionalSampleScore[];
-    };
+export type ProvisionalDirectionalOutcome =
+  | "PROVISIONAL_LONG_SUPPORTED"
+  | "PROVISIONAL_SHORT_SUPPORTED"
+  | "NO_PROVISIONAL_DIRECTIONAL_EVIDENCE";
+
+export type FormalDirectionalOutcome =
+  | "DIRECTIONAL_LONG_SUPPORTED"
+  | "DIRECTIONAL_SHORT_SUPPORTED"
+  | "NO_DIRECTIONAL_EVIDENCE";
+
+export type DirectionalStageEvaluation<Outcome extends string> = {
+  readonly sampleCount: number;
+  readonly outcome: Outcome;
+  readonly long: DirectionMetrics;
+  readonly short: DirectionMetrics;
+};
+
+export type DirectionalStudyResult = {
+  readonly status: "COLLECTING" | "EVALUATED";
+  readonly sampleCount: number;
+  readonly requiredSampleCount: typeof DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE;
+  /** Frozen exactly once from the first three observations. */
+  readonly provisional: DirectionalStageEvaluation<ProvisionalDirectionalOutcome> | null;
+  /** Present only when all ten observations exist. */
+  readonly formal: DirectionalStageEvaluation<FormalDirectionalOutcome> | null;
+  readonly authorization: {
+    readonly strategyGeneratedTestnet:
+      | "LOCKED_PENDING_PROVISIONAL_GATE"
+      | "ELIGIBLE_FOR_EXPLICIT_REVIEW"
+      | "NOT_ELIGIBLE";
+    readonly microCapital:
+      | "LOCKED_PENDING_FORMAL_GATE"
+      | "ELIGIBLE_FOR_EXPLICIT_REVIEW"
+      | "NOT_ELIGIBLE";
+  };
+  readonly samples: readonly DirectionalSampleScore[];
+};
 
 /**
  * Pure research evaluator. It has no execution dependency and never emits a
- * PerpIntent. Directional Study v1 closes after the first ten observations.
+ * PerpIntent. v1.1 freezes a provisional hypothesis at 3 observations and the
+ * formal result at 10; neither result automatically activates trading.
  */
 export function evaluateDirectionalStudyV1(
   observations: readonly DirectionalStudyObservation[]
 ): DirectionalStudyResult {
   if (observations.length > DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE) {
-    throw new Error("Directional Study v1 primary cohort is already closed at 10 observations");
+    throw new Error("Directional Study v1.1 primary cohort is already closed at 10 observations");
   }
 
   const candidateIds = new Set<string>();
@@ -123,34 +145,69 @@ export function evaluateDirectionalStudyV1(
     return scoreObservation(observation);
   });
 
-  if (samples.length < DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE) {
-    return {
-      status: "COLLECTING",
-      outcome: null,
-      sampleCount: samples.length,
-      requiredSampleCount: DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE,
-      samples
-    };
-  }
-
-  const long = aggregateDirection("LONG", samples);
-  const short = aggregateDirection("SHORT", samples);
-  const longSupported = supportsDirection(long);
-  const shortSupported = supportsDirection(short);
-  const outcome = longSupported
-    ? "DIRECTIONAL_LONG_SUPPORTED"
-    : shortSupported
-      ? "DIRECTIONAL_SHORT_SUPPORTED"
-      : "NO_DIRECTIONAL_EVIDENCE";
+  const provisional = samples.length >= DIRECTIONAL_STUDY_PROVISIONAL_SAMPLE_SIZE
+    ? evaluateProvisional(samples.slice(0, DIRECTIONAL_STUDY_PROVISIONAL_SAMPLE_SIZE))
+    : null;
+  const formal = samples.length === DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE
+    ? evaluateFormal(samples)
+    : null;
+  const provisionalSupported = provisional !== null
+    && provisional.outcome !== "NO_PROVISIONAL_DIRECTIONAL_EVIDENCE";
+  const formalSupported = formal !== null && formal.outcome !== "NO_DIRECTIONAL_EVIDENCE";
 
   return {
-    status: "EVALUATED",
-    outcome,
-    sampleCount: DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE,
+    status: formal === null ? "COLLECTING" : "EVALUATED",
+    sampleCount: samples.length,
     requiredSampleCount: DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE,
-    long,
-    short,
+    provisional,
+    formal,
+    authorization: {
+      strategyGeneratedTestnet: provisional === null
+        ? "LOCKED_PENDING_PROVISIONAL_GATE"
+        : provisionalSupported || formalSupported
+          ? "ELIGIBLE_FOR_EXPLICIT_REVIEW"
+          : "NOT_ELIGIBLE",
+      microCapital: formal === null
+        ? "LOCKED_PENDING_FORMAL_GATE"
+        : formalSupported
+          ? "ELIGIBLE_FOR_EXPLICIT_REVIEW"
+          : "NOT_ELIGIBLE"
+    },
     samples
+  };
+}
+
+function evaluateProvisional(
+  samples: readonly DirectionalSampleScore[]
+): DirectionalStageEvaluation<ProvisionalDirectionalOutcome> {
+  const { long, short } = directionMetrics(samples);
+  const outcome = supportsDirection(long, DIRECTIONAL_STUDY_PROVISIONAL_MIN_HIT_RATE)
+    ? "PROVISIONAL_LONG_SUPPORTED"
+    : supportsDirection(short, DIRECTIONAL_STUDY_PROVISIONAL_MIN_HIT_RATE)
+      ? "PROVISIONAL_SHORT_SUPPORTED"
+      : "NO_PROVISIONAL_DIRECTIONAL_EVIDENCE";
+  return { sampleCount: DIRECTIONAL_STUDY_PROVISIONAL_SAMPLE_SIZE, outcome, long, short };
+}
+
+function evaluateFormal(
+  samples: readonly DirectionalSampleScore[]
+): DirectionalStageEvaluation<FormalDirectionalOutcome> {
+  const { long, short } = directionMetrics(samples);
+  const outcome = supportsDirection(long, DIRECTIONAL_STUDY_MIN_HIT_RATE)
+    ? "DIRECTIONAL_LONG_SUPPORTED"
+    : supportsDirection(short, DIRECTIONAL_STUDY_MIN_HIT_RATE)
+      ? "DIRECTIONAL_SHORT_SUPPORTED"
+      : "NO_DIRECTIONAL_EVIDENCE";
+  return { sampleCount: DIRECTIONAL_STUDY_PRIMARY_SAMPLE_SIZE, outcome, long, short };
+}
+
+function directionMetrics(samples: readonly DirectionalSampleScore[]): {
+  readonly long: DirectionMetrics;
+  readonly short: DirectionMetrics;
+} {
+  return {
+    long: aggregateDirection("LONG", samples),
+    short: aggregateDirection("SHORT", samples)
   };
 }
 
@@ -206,9 +263,9 @@ function aggregateDirection(
   };
 }
 
-function supportsDirection(metrics: DirectionMetrics): boolean {
+function supportsDirection(metrics: DirectionMetrics, minimumHitRate: number): boolean {
   return metrics.medianPrimaryReturnBps > 0
-    && metrics.primaryHitRate >= DIRECTIONAL_STUDY_MIN_HIT_RATE
+    && metrics.primaryHitRate >= minimumHitRate
     && metrics.medianMfeBps > metrics.medianMaeBps;
 }
 

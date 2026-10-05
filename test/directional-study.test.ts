@@ -10,13 +10,43 @@ import {
 } from "../src/directional-study.ts";
 import type { DirectionalStudyObservation } from "../src/directional-study.ts";
 
-test("collects fewer than ten qualified prospective Candidates without a direction verdict", () => {
-  const result = evaluateDirectionalStudyV1(Array.from({ length: 9 }, (_, index) => observation(index, 100)));
+test("keeps both authorization stages locked before three qualified Candidates", () => {
+  const result = evaluateDirectionalStudyV1(Array.from({ length: 2 }, (_, index) => observation(index, 101)));
 
   assert.equal(result.status, "COLLECTING");
-  assert.equal(result.outcome, null);
-  assert.equal(result.sampleCount, 9);
+  assert.equal(result.provisional, null);
+  assert.equal(result.formal, null);
+  assert.equal(result.sampleCount, 2);
   assert.equal(result.requiredSampleCount, 10);
+  assert.equal(result.authorization.strategyGeneratedTestnet, "LOCKED_PENDING_PROVISIONAL_GATE");
+  assert.equal(result.authorization.microCapital, "LOCKED_PENDING_FORMAL_GATE");
+});
+
+test("freezes a 2-of-3 provisional LONG hypothesis for explicit Testnet review only", () => {
+  const result = evaluateDirectionalStudyV1([
+    observation(0, 102),
+    observation(1, 101),
+    observation(2, 99)
+  ]);
+
+  assert.equal(result.status, "COLLECTING");
+  assert.equal(result.provisional?.outcome, "PROVISIONAL_LONG_SUPPORTED");
+  assert.equal(result.provisional?.long.primaryHitRate, 0.66666667);
+  assert.equal(result.formal, null);
+  assert.equal(result.authorization.strategyGeneratedTestnet, "ELIGIBLE_FOR_EXPLICIT_REVIEW");
+  assert.equal(result.authorization.microCapital, "LOCKED_PENDING_FORMAL_GATE");
+});
+
+test("does not re-run the provisional gate on observations four through nine", () => {
+  const returns = [-1, 1, -1, 2, 2, 2, 2, 2, 2];
+  const result = evaluateDirectionalStudyV1(
+    returns.map((value, index) => observation(index, 100 + value))
+  );
+
+  assert.equal(result.status, "COLLECTING");
+  assert.equal(result.provisional?.outcome, "NO_PROVISIONAL_DIRECTIONAL_EVIDENCE");
+  assert.equal(result.provisional?.sampleCount, 3);
+  assert.equal(result.authorization.strategyGeneratedTestnet, "NOT_ELIGIBLE");
 });
 
 test("supports LONG only when the frozen 4h gate passes all three checks", () => {
@@ -25,10 +55,11 @@ test("supports LONG only when the frozen 4h gate passes all three checks", () =>
 
   assert.equal(result.status, "EVALUATED");
   if (result.status !== "EVALUATED") return;
-  assert.equal(result.outcome, "DIRECTIONAL_LONG_SUPPORTED");
-  assert.equal(result.long.primaryHitRate, 0.7);
-  assert.equal(result.long.medianPrimaryReturnBps, 100);
-  assert.ok(result.long.medianMfeBps > result.long.medianMaeBps);
+  assert.equal(result.formal?.outcome, "DIRECTIONAL_LONG_SUPPORTED");
+  assert.equal(result.formal?.long.primaryHitRate, 0.7);
+  assert.equal(result.formal?.long.medianPrimaryReturnBps, 100);
+  assert.ok(result.formal !== null && result.formal.long.medianMfeBps > result.formal.long.medianMaeBps);
+  assert.equal(result.authorization.microCapital, "ELIGIBLE_FOR_EXPLICIT_REVIEW");
 });
 
 test("supports SHORT using the same symmetric primary gate", () => {
@@ -39,9 +70,9 @@ test("supports SHORT using the same symmetric primary gate", () => {
 
   assert.equal(result.status, "EVALUATED");
   if (result.status !== "EVALUATED") return;
-  assert.equal(result.outcome, "DIRECTIONAL_SHORT_SUPPORTED");
-  assert.equal(result.short.primaryHitRate, 0.7);
-  assert.equal(result.short.medianPrimaryReturnBps, 100);
+  assert.equal(result.formal?.outcome, "DIRECTIONAL_SHORT_SUPPORTED");
+  assert.equal(result.formal?.short.primaryHitRate, 0.7);
+  assert.equal(result.formal?.short.medianPrimaryReturnBps, 100);
 });
 
 test("returns NO_DIRECTIONAL_EVIDENCE when hit rate is below the frozen threshold", () => {
@@ -50,8 +81,9 @@ test("returns NO_DIRECTIONAL_EVIDENCE when hit rate is below the frozen threshol
 
   assert.equal(result.status, "EVALUATED");
   if (result.status !== "EVALUATED") return;
-  assert.equal(result.long.primaryHitRate, 0.6);
-  assert.equal(result.outcome, "NO_DIRECTIONAL_EVIDENCE");
+  assert.equal(result.formal?.long.primaryHitRate, 0.6);
+  assert.equal(result.formal?.outcome, "NO_DIRECTIONAL_EVIDENCE");
+  assert.equal(result.authorization.microCapital, "NOT_ELIGIBLE");
 });
 
 test("does not support a direction when its 4h path has larger median MAE than MFE", () => {
@@ -65,8 +97,8 @@ test("does not support a direction when its 4h path has larger median MAE than M
 
   assert.equal(result.status, "EVALUATED");
   if (result.status !== "EVALUATED") return;
-  assert.ok(result.long.medianMfeBps < result.long.medianMaeBps);
-  assert.equal(result.outcome, "NO_DIRECTIONAL_EVIDENCE");
+  assert.ok(result.formal !== null && result.formal.long.medianMfeBps < result.formal.long.medianMaeBps);
+  assert.equal(result.formal?.outcome, "NO_DIRECTIONAL_EVIDENCE");
 });
 
 test("reports secondary, funding, YES, and measurement fields without putting them in the primary gate", () => {
@@ -85,7 +117,7 @@ test("reports secondary, funding, YES, and measurement fields without putting th
   const result = evaluateDirectionalStudyV1(observations);
 
   assert.equal(result.status, "EVALUATED");
-  assert.equal(result.outcome, "DIRECTIONAL_LONG_SUPPORTED");
+  assert.equal(result.formal?.outcome, "DIRECTIONAL_LONG_SUPPORTED");
   assert.equal(result.samples[0].longFundingReturnBps, -1.01);
   assert.equal(result.samples[0].yesChange1h, 0.05);
   assert.equal(result.samples[0].yesChange4h, 0.1);

@@ -539,7 +539,9 @@ TradeCandidate
 
 没有冻结 mapping 时只产生 `NO_INTENT / BLOCKED`；`BUY_YES` 不会自行推导 perp 方向。当前 Crypto FDV Variant 仍未激活为可交易 perp policy。详见 [Strategy Signal → Perp Position Expression](docs/research/perp-position-expression.md)。
 
-`Directional Study v1.0.0` 已预注册并保持纯研究边界：只对前 10 个 qualified prospective Candidates 比较 4h `LONG hypothesis` 与 `SHORT hypothesis`。1h、YES change、funding 与 `measurementAt` 仅独立报告；两种方向均未通过冻结 gate 时结论为 `NO_DIRECTIONAL_EVIDENCE → SIGNAL_ONLY → STOP`。Evaluator 不生成 `PerpIntent`、不连接 Risk / Execution。详见 [Directional Study v1](docs/research/directional-study-v1.md)。
+`Directional Study v1.1.0` 已预注册为分级授权：首 3 个 qualified prospective Candidates 只冻结 provisional direction，并最多解锁 strategy-generated Testnet 的显式审核；完整 10 个样本才运行原 70% formal gate，并最多解锁 Micro-Capital 审核。任何 stage 都不自动生成 `PerpIntent` 或下单；1h、YES change、funding 与 `measurementAt` 仍只独立报告。详见 [Directional Study v1.1](docs/research/directional-study-v1.md)。
+
+首次真实 FDV discovery 的 `426 observed / 33 new potential / 0 qualified` 已构成启动第二 Concrete Variant 设计研究的证据。当前只确认 BTC/ETH/SOL fixed-time price-threshold markets 的 prospective 供给明显更高，并冻结“同一 asset × measurement episode 只能算一个独立采样机会”的研究约束；Variant 2 尚未冻结，也没有执行权限。详见 [Crypto Price-Target Feasibility](docs/research/price-target-variant-feasibility.md)。
 
 当前 AI 只运行于 Shadow Mode。
 

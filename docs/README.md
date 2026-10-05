@@ -44,7 +44,8 @@
 ## AI 与策略验证
 
 - [Strategy Thesis × Variant × Formal Batch：策略边界纠偏说明](research/strategy-thesis-boundary-correction.md) — 先分清“上层研究假设、当前具体策略、当前冻结实验批次”，避免把 Crypto-FDV v2.1 误当成整个策略定义。
-- [Directional Study v1：预注册协议](research/directional-study-v1.md) — 只研究 Candidate 对 underlying perp 的 4h LONG/SHORT 方向含义；无证据则保持 SIGNAL_ONLY 并停止。
+- [Directional Study v1.1：分级授权预注册协议](research/directional-study-v1.md) — 3 个样本只解锁 Testnet review，10 个样本才解锁 Micro-Capital review；两级都不自动交易。
+- [Concrete Variant 2：Crypto Price-Target Feasibility](research/price-target-variant-feasibility.md) — 真实核查 BTC/ETH/SOL fixed-time price contracts 的样本供给与独立性风险；当前只进入协议设计，不写执行代码。
 - [AI Shadow 研究边界](research/ai-shadow.md)
 - [验证方法：Historical Replay / FORMAL / Prospective](research/validation-methodology.md)
 - [Strategy Lab 收尾：Formal 1m Protocol × PENGU](research/strategy-lab-closeout.md)
