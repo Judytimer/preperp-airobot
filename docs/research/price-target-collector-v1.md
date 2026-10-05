@@ -142,6 +142,6 @@ waiting: 1
 
 12 个 `DATA_BLOCKED`（ETH 6、SOL 6）永久保留。它们在约 6 小时采集空档内发生 crossing，但 registration book 距 T0 超过 120 秒，因此不得回填。
 
-7 个 BTC Candidates 共享 `asset=BTC`、`candidateT0=2026-10-05T22:20:00.000Z`、`selectedStrike=86000` 和同一 underlying crossing。它们仍是 7 个合法 Prediction contracts，但按 [Study Independence Rule v1.0.0](price-target-variant-study-independence-v1.md) 只形成 1 个 independent trigger cluster。
+7 个 BTC Candidates 共享 `asset=BTC`、`candidateT0=2026-10-05T22:20:00.000Z`、`selectedStrike=86000` 和同一 underlying crossing。它们仍是 7 个合法 Prediction contracts，但按 [Study Independence Rule v1.0.1](price-target-variant-study-independence-v1.md) 只形成 1 个 independent trigger cluster。该 cluster 已锁定 cohort 第一个 slot；后续若成为 `DATA_BLOCKED` 也不得由更晚 cluster 替换。
 
 当前运行结论：`KEEP COLLECTOR RUNNING / STOP DEVELOPMENT`。
