@@ -4,7 +4,7 @@
   "title": "Strategy Lab v2.1.x Polymarket First Discovery Record",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "marketId", "question", "slug", "disposition", "reason", "registeredAt", "market", "discovery", "acquisitionClock"],
+  "required": ["schemaVersion", "marketId", "question", "slug", "disposition", "reason", "registeredAt", "market", "discovery"],
   "properties": {
     "schemaVersion": { "enum": ["2.1.0", "2.1.1"] },
     "marketId": { "type": "string", "minLength": 1 },
@@ -48,6 +48,51 @@
       }
     },
     "acquisitionClock": {
+      "oneOf": [
+        { "$ref": "#/$defs/legacyAcquisitionClock" },
+        { "$ref": "#/$defs/activeAcquisitionClock" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "schemaVersion": { "const": "2.1.0" } },
+        "required": ["schemaVersion"]
+      },
+      "then": {
+        "properties": {
+          "discovery": {
+            "properties": {
+              "sourceUrl": { "const": "https://gamma-api.polymarket.com/markets?closed=false&limit=100&order=createdAt&ascending=false" }
+            }
+          },
+          "acquisitionClock": { "$ref": "#/$defs/legacyAcquisitionClock" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "schemaVersion": { "const": "2.1.1" } },
+        "required": ["schemaVersion"]
+      },
+      "then": {
+        "required": ["acquisitionClock"],
+        "properties": {
+          "discovery": {
+            "properties": {
+              "sourceUrl": { "const": "https://gamma-api.polymarket.com/public-search?q=FDV&limit_per_type=50&events_status=active&page=1" }
+            }
+          },
+          "acquisitionClock": { "$ref": "#/$defs/activeAcquisitionClock" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "timestamp": { "type": "number", "minimum": 0 },
+    "nullableTimestamp": { "type": ["number", "null"], "minimum": 0 },
+    "legacyAcquisitionClock": {
       "type": "object",
       "additionalProperties": false,
       "required": ["basis", "sourceDate", "localRequestStartedAt", "localResponseReceivedAt", "midpointOffsetMs"],
@@ -58,10 +103,19 @@
         "localResponseReceivedAt": { "$ref": "#/$defs/timestamp" },
         "midpointOffsetMs": { "type": "number" }
       }
+    },
+    "activeAcquisitionClock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "sourceDate", "responseAgeSeconds", "localRequestStartedAt", "localResponseReceivedAt", "midpointOffsetMs"],
+      "properties": {
+        "basis": { "const": "POLYMARKET_HTTP_DATE_PLUS_AGE" },
+        "sourceDate": { "$ref": "#/$defs/timestamp" },
+        "responseAgeSeconds": { "type": "integer", "minimum": 0 },
+        "localRequestStartedAt": { "$ref": "#/$defs/timestamp" },
+        "localResponseReceivedAt": { "$ref": "#/$defs/timestamp" },
+        "midpointOffsetMs": { "type": "number" }
+      }
     }
-  },
-  "$defs": {
-    "timestamp": { "type": "number", "minimum": 0 },
-    "nullableTimestamp": { "type": ["number", "null"], "minimum": 0 }
   }
 }

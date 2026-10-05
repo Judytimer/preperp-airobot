@@ -2,6 +2,9 @@
 
 日期：2026-10-02
 状态：**FROZEN / WAITING_FOR_QUALIFIED_MARKET**
+Discovery source patch：**v2.1.1 FROZEN（2026-10-04）**
+
+v2.1.1 freeze gate 已通过：完整测试套件通过；实源只读扫描成功解析 50 个 active search events、423 个 Crypto-tagged markets，未产生 `DATA_BLOCKED`；`firstDiscoveredAt === retrievedAt === HTTP Date + Age` 已由落盘 scan 与 market record 交叉核对。真实 raw evidence 保留在 Git 忽略的 `work/prospective-v2.1/discovery`，不提交到源码仓库。
 
 ## 0. Scope：v2.1 是 Formal Batch，不是整个 Strategy
 
@@ -91,7 +94,7 @@ npm run prospective:discover
 
 - ACTIVE source 固定读取 `public-search?q=FDV&limit_per_type=50&events_status=active&page=1`，只处理带 Crypto `tag_id=21` 的 events，并将其中 markets 展平后交给原 market parser；第一页是有界、非穷尽覆盖，不声称覆盖 Polymarket 全量历史；
 - v2.1.0 的 latest-100 general markets URL 继续作为 LEGACY evidence allowlist；旧 raw、market record、`firstDiscoveredAt` 和 SHA-256 永不回写或失效；
-- 完整原样保存 Gamma 响应、retrievedAt 与 SHA-256；`retrievedAt` 使用响应的 Polymarket HTTP `Date`，同时记录本机请求起止时间与 midpoint offset，避免本机时钟偏差制造 future-data 假象；
+- 完整原样保存 Gamma 响应、retrievedAt 与 SHA-256；`retrievedAt = HTTP Date + Age`：`Date` 提供服务端时间，`Age` 补回 CDN 缓存驻留秒数（缺失按 0，畸形则 fail closed），避免缓存命中把首次发现时间回填；同时记录本机请求起止时间与 midpoint offset，本机时钟只作审计，不拥有前瞻边界；
 - 每个 marketId 首次出现时，以不可覆盖文件冻结 `registeredAt === firstDiscoveredAt === retrievedAt`；
 - 重复抓取保留原 first-discovery record，不重复登记；
 - 每次扫描使用独立 scanId 且 scan summary 只允许首次创建；相同 ID 冲突时拒绝，禁止覆盖旧扫描；

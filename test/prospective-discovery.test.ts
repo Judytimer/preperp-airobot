@@ -24,7 +24,7 @@ test("FDV search records only crypto-tagged markets without triggering admission
   ]);
   const result = await runPolymarketDiscoveryScan(directory, {
     now: () => Date.parse("2026-10-02T12:05:00Z"),
-    fetcher: ok(raw)
+    fetcher: ok(raw, "Fri, 02 Oct 2026 12:05:00 GMT", "120")
   });
 
   assert.equal(result.scan.sourceUrl, POLYMARKET_DISCOVERY_SOURCE_URL);
@@ -41,8 +41,10 @@ test("FDV search records only crypto-tagged markets without triggering admission
   assert.equal(fdv.registeredAt, fdv.discovery.firstDiscoveredAt);
   assert.equal(fdv.discovery.firstDiscoveredAt, fdv.discovery.retrievedAt);
   assert.equal(fdv.discovery.sourceUrl, POLYMARKET_DISCOVERY_SOURCE_URL);
-  assert.equal(fdv.acquisitionClock.basis, "POLYMARKET_HTTP_DATE");
+  assert.equal(fdv.acquisitionClock.basis, "POLYMARKET_HTTP_DATE_PLUS_AGE");
   assert.equal(fdv.acquisitionClock.sourceDate, Date.parse("2026-10-02T12:05:00Z"));
+  assert.equal(fdv.acquisitionClock.responseAgeSeconds, 120);
+  assert.equal(fdv.discovery.retrievedAt, Date.parse("2026-10-02T12:07:00Z"));
   assert.match(fdv.discovery.rawResponsePath, /^\.\.\/raw\//);
 
   const other = JSON.parse(await readFile(join(directory, "markets", "OTHER-1.json"), "utf8"));
@@ -64,6 +66,7 @@ test("a repeated active discovery preserves a legacy first-discovery record exac
   const legacy = JSON.parse(await readFile(recordPath, "utf8"));
   legacy.schemaVersion = "2.1.0";
   legacy.discovery.sourceUrl = POLYMARKET_LEGACY_DISCOVERY_SOURCE_URL;
+  delete legacy.acquisitionClock;
   await writeFile(recordPath, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
   const before = await readFile(recordPath, "utf8");
 
@@ -78,6 +81,7 @@ test("a repeated active discovery preserves a legacy first-discovery record exac
   assert.equal(record.discovery.firstDiscoveredAt, Date.parse("2026-10-02T12:05:00Z"));
   assert.equal(record.schemaVersion, "2.1.0");
   assert.equal(record.discovery.sourceUrl, POLYMARKET_LEGACY_DISCOVERY_SOURCE_URL);
+  assert.equal(record.acquisitionClock, undefined);
   assert.equal(after, before);
   assert.equal((await readdir(join(directory, "markets"))).length, 1);
 });
@@ -159,6 +163,15 @@ test("HTTP and malformed payload failures publish no scan or market records", as
     /Date header is missing or invalid/
   );
   assert.deepEqual(await readdir(dateDirectory), []);
+
+  const ageDirectory = await mkdtemp(join(tmpdir(), "prospective-discovery-"));
+  await assert.rejects(
+    runPolymarketDiscoveryScan(ageDirectory, {
+      fetcher: ok(search([]), "Fri, 02 Oct 2026 12:05:00 GMT", "1.5")
+    }),
+    /Age header is invalid/
+  );
+  assert.deepEqual(await readdir(ageDirectory), []);
 });
 
 function market(id: string, question: string, updatedAt: string) {
@@ -195,9 +208,17 @@ function search(events: readonly unknown[]) {
   });
 }
 
-function ok(body: string, date = "Fri, 02 Oct 2026 12:05:00 GMT"): typeof fetch {
+function ok(
+  body: string,
+  date = "Fri, 02 Oct 2026 12:05:00 GMT",
+  age?: string
+): typeof fetch {
   return async () => new Response(body, {
     status: 200,
-    headers: { "content-type": "application/json", date }
+    headers: {
+      "content-type": "application/json",
+      date,
+      ...(age === undefined ? {} : { age })
+    }
   });
 }

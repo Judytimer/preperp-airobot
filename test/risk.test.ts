@@ -48,6 +48,49 @@ test("LONG 0.01 -> target LONG 0.01 requires no order", () => {
   assert.deepEqual(decision, { approved: false, reason: "already LONG" });
 });
 
+test("LONG 0.01 -> target FLAT requires SELL 0.01", () => {
+  const decision = evaluate("FLAT", position("LONG", 0.01));
+  assert.equal(decision.approved, true);
+  if (decision.approved) {
+    assert.equal(decision.order.side, "SELL");
+    assert.equal(decision.order.qty, 0.01);
+  }
+});
+
+test("SHORT 0.01 -> target FLAT requires BUY 0.01", () => {
+  const decision = evaluate("FLAT", position("SHORT", 0.01));
+  assert.equal(decision.approved, true);
+  if (decision.approved) {
+    assert.equal(decision.order.side, "BUY");
+    assert.equal(decision.order.qty, 0.01);
+  }
+});
+
+test("explicit PerpIntent quantity resizes a same-side target by delta", () => {
+  const decision = risk.evaluate(
+    { action: "LONG", targetQty: 0.025, shortMa: null, longMa: null, reason: "authorized PerpIntent" },
+    position("LONG", 0.01),
+    tick
+  );
+  assert.equal(decision.approved, true);
+  if (decision.approved) {
+    assert.equal(decision.order.side, "BUY");
+    assert.equal(decision.order.qty, 0.015);
+  }
+});
+
+test("explicit PerpIntent quantity remains bounded by maxAbsPosition", () => {
+  const decision = risk.evaluate(
+    { action: "LONG", targetQty: 0.031, shortMa: null, longMa: null, reason: "oversized PerpIntent" },
+    position("FLAT", 0),
+    tick
+  );
+  assert.deepEqual(decision, {
+    approved: false,
+    reason: "target 0.031 exceeds maxAbsPosition 0.03"
+  });
+});
+
 function position(side: Position["side"], qty: number): Position {
   return {
     symbol: "BTC-PERP",

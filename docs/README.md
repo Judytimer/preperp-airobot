@@ -32,6 +32,8 @@
 
 ### 故障与交易一致性案例
 
+- [Perp Execution Validation](cases/perp-execution-validation.md) — 用显式 validation target 验证 Order / Margin / Position / PnL / Funding / Liquidation，不把双均线当 alpha 或验证对象。
+- [Strategy Signal → Perp Position Expression](research/perp-position-expression.md) — 用 pre-T0 frozen policy 显式桥接 Prediction Candidate 与 PerpIntent；默认不从 BUY_YES 推导方向。
 - [F06：PerpBot 的交易所客户端边界](cases/f06-client-boundary.md)
 - [Cancel × Fill × Reconciliation 专项审计](cases/cancel-fill-reconciliation.md)
 - [Liquidation × Late Fill 复现实验](cases/liquidation-late-fill.md)

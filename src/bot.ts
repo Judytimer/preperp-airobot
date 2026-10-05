@@ -16,6 +16,7 @@ import { InFlightOrderTracker } from "./order-tracker.ts";
 import type { InFlightOrder } from "./order-tracker.ts";
 import { RiskManager } from "./risk.ts";
 import { MovingAverageSignal } from "./strategy.ts";
+import type { PerpSignalSource } from "./strategy.ts";
 import { round } from "./math.ts";
 import { IsolatedMarginAccount } from "./margin.ts";
 import type { MarginConfig, MarginSnapshot } from "./margin.ts";
@@ -25,10 +26,8 @@ import { PaperLiquidationExecutor } from "./liquidation.ts";
 import { reconcileState } from "./reconciliation.ts";
 import type { ExchangeStateSnapshot, ReconciliationReport } from "./reconciliation.ts";
 
-export type BotConfig = {
+type CommonBotConfig = {
   symbol: string;
-  shortWindow: number;
-  longWindow: number;
   orderQty: number;
   maxAbsPosition: number;
   venue: ExecutionVenue;
@@ -37,8 +36,21 @@ export type BotConfig = {
   logger?: Logger;
 };
 
+export type BotConfig = CommonBotConfig & (
+  | {
+      shortWindow: number;
+      longWindow: number;
+      signalSource?: never;
+    }
+  | {
+      signalSource: PerpSignalSource;
+      shortWindow?: never;
+      longWindow?: never;
+    }
+);
+
 export class PerpBot {
-  private readonly strategy: MovingAverageSignal;
+  private readonly strategy: PerpSignalSource;
   private readonly risk: RiskManager;
   private readonly venue: ExecutionVenue;
   private positions: PositionBook;
@@ -56,7 +68,9 @@ export class PerpBot {
   private readonly cancelConfirmations = new Map<string, () => void>();
 
   constructor(config: BotConfig) {
-    this.strategy = new MovingAverageSignal(config.shortWindow, config.longWindow);
+    this.strategy = "signalSource" in config && config.signalSource !== undefined
+      ? config.signalSource
+      : new MovingAverageSignal(config.shortWindow, config.longWindow);
     this.risk = new RiskManager({
       orderQty: config.orderQty,
       maxAbsPosition: config.maxAbsPosition

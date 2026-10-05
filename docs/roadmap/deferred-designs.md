@@ -44,6 +44,8 @@ Simulator 已能制造 delayed / partial / late 等场景。后续可以把它�
 
 当前已有 Binance USDⓈ-M Futures Testnet adapter、market feed、user-data event mapping 和只读 reconciliation。
 
+`Perp Execution Validation v1.0.0` 的 P0 deterministic paper gate 已完成，并用显式 `LONG → FLAT` target 取代 MA crossover 作为验收触发器。P1 authenticated Testnet 也已完成真实 `FLAT → LONG 0.001 → FLAT`、ACK / Fill、fee 与权威 FLAT reconciliation；本次短时往返未跨 funding settlement，但只读历史 endpoint 已观察到 10 条交易所权威 `FUNDING_FEE` 流水。P2 live micro-capital 必须另行明确授权。
+
 后续重点是：
 
 ```text
@@ -73,7 +75,9 @@ MFE / MAE 只有在 final outcome 隐藏路径风险时才加。
 
 ## F. AI 研究
 
-延期：memory-sensitivity、primary-source authentication、reviewer stability、bounded AI gating、Prediction Signal → PerpIntent。
+延期：memory-sensitivity、primary-source authentication、reviewer stability、bounded AI gating，以及用 prospective evidence 激活某个具体的 Prediction → Perp mapping。
+
+`Prediction Signal → PerpIntent` 的通用语义桥已由 `Perp Expression v1.0.0` 实现：pre-T0 frozen policy、market/symbol admission、`SIGNAL_ONLY / DIRECTIONAL_PROXY / HEDGE`、risk/leverage/position-bounded sizing，以及 stop/expiry latch。当前 FDV Variant 没有 active directional/hedge policy；这项业务选择继续由证据触发，不从 `BUY_YES` 自动推断。
 
 AI gating 即使未来开启，也不能绕过 deterministic Risk。
 

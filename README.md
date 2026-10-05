@@ -353,6 +353,14 @@ npm start
 npm run demo
 ```
 
+运行独立 Perp Core 执行验证（不使用双均线作为交易逻辑）：
+
+```bash
+npm run validate:perp
+```
+
+该入口使用显式 `LONG → FLAT` validation target，分别验收 Order Lifecycle、Partial Fill、Position、fee/funding/PnL、Margin preflight 与 Liquidation boundary。P0 deterministic paper 和 P1 authenticated Testnet 都已经通过；P2 真钱验证未授权、未执行。详见 [Perp Execution Validation](docs/cases/perp-execution-validation.md)。
+
 Demo 会展示：
 
 ```text
@@ -388,6 +396,10 @@ npm test
 - Cross-zero position
 - Margin validation
 - Liquidation path
+- Explicit `FLAT` target and strategy/execution decoupling
+- Frozen Prediction Candidate → PerpIntent semantic admission and risk-bounded sizing
+- Intent target quantity, stop/expiry latch, and deterministic delta-order routing
+- Deterministic fee / funding / realized-PnL equation
 - Checkpoint recovery
 - Reconciliation
 
@@ -408,6 +420,14 @@ $env:BINANCE_TESTNET_API_KEY = "..."
 $env:BINANCE_TESTNET_API_SECRET = "..."
 npm run testnet
 ```
+
+运行策略中立的认证测试网往返验收：
+
+```powershell
+npm run validate:perp:testnet
+```
+
+该命令会真实提交 Testnet 订单，只能从 local/venue 同时 FLAT、无 open orders、对账一致且不需要 recovery 的状态启动；它不是日常 demo 命令，也不会自动升级到真钱环境。
 
 Testnet 使用独立 checkpoint：
 
@@ -506,6 +526,19 @@ YES → Perp LONG
 NO  → Perp SHORT
 ```
 
+仓库现已加入 `Perp Expression v1.0.0`，把这个语义缺口实现为显式 contract：
+
+```text
+TradeCandidate
+→ pre-T0 FrozenPerpExpressionPolicy
+→ SIGNAL_ONLY / DIRECTIONAL_PROXY / HEDGE
+→ PerpIntent(size / leverage cap / stop / expiry)
+→ Deterministic Risk
+→ Execution
+```
+
+没有冻结 mapping 时只产生 `NO_INTENT / BLOCKED`；`BUY_YES` 不会自行推导 perp 方向。当前 Crypto FDV Variant 仍未激活为可交易 perp policy。详见 [Strategy Signal → Perp Position Expression](docs/research/perp-position-expression.md)。
+
 当前 AI 只运行于 Shadow Mode。
 
 运行：
@@ -528,7 +561,7 @@ Historical Replay 是一个**有限的诊断阶段**，不是永久运行的研�
 
 Prospective v1 没有产生正式样本，现已冻结并由 v2.1 取代。**v2.1 只定义当前 Crypto-FDV Variant 的 prospective batch，不定义整个 Cross-Market Repricing Thesis。** Prospective v2.1 允许已经在 Binance Spot 上线的加密资产；它以归档的 Polymarket Gamma 首次公开发现时间作为不可回填的边界，baseline 固定为该时间之后第一根完整 1m candle。Polymarket 市场开放时间只保留为证据字段。`npm run manifest:check -- path/to/candidate-v2.1.json` 只做 admission，输出 `DATA_READY / DATA_BLOCKED / INELIGIBLE`，不会抓行情、调用 Strategy 或触发交易。详见 [Strategy Lab v2.1 Prospective Manifest](docs/research/prospective-manifest-v2.md)。
 
-`npm run prospective:discover` 执行一次最小只读发现。Discovery source patch `v2.1.1` 固定查询公开且免认证的 Polymarket Gamma `public-search(q=FDV)` 第一页（最多 50 个 active events），只展平带 Crypto `tag_id=21` 的 event markets，归档完整原始响应，并为每个 marketId 只写一次不可覆盖的 first-discovery record。明确出现 `FDV` 或 `fully diluted valuation/value` 的市场只标记为 `POTENTIAL_FDV_REVIEW`；它不会自动推断资产、填 supply、改变 Strategy 或进入 Risk/Paper/Shadow。旧版 latest-100 general URL 保留为 LEGACY evidence allowlist，不回写旧记录。默认证据目录是被 Git 忽略的 `work/prospective-v2.1/discovery`。
+`npm run prospective:discover` 执行一次最小只读发现。Discovery source patch `v2.1.1` 固定查询公开且免认证的 Polymarket Gamma `public-search(q=FDV)` 第一页（最多 50 个 active events），只展平带 Crypto `tag_id=21` 的 event markets，归档完整原始响应，并为每个 marketId 只写一次不可覆盖的 first-discovery record。首次发现时间使用 HTTP `Date + Age`，避免 CDN cache hit 把 discovery boundary 回填。明确出现 `FDV` 或 `fully diluted valuation/value` 的市场只标记为 `POTENTIAL_FDV_REVIEW`；它不会自动推断资产、填 supply、改变 Strategy 或进入 Risk/Paper/Shadow。旧版 latest-100 general URL 保留为 LEGACY evidence allowlist，不回写旧记录。默认证据目录是被 Git 忽略的 `work/prospective-v2.1/discovery`。
 
 归档首次发现、Binance Kline 与 Polymarket last-trade 的真实 raw artifacts 后，`npm run strategy-lab:replay -- candidate-v2.1.json observation-v2.1.json reports/prospective-v2.1` 执行 Formal v2.1 链路并原子保存报告。Runner 会从 raw artifact 重新解析完整 candle / YES 序列，并要求它们与 observation 审计副本逐项一致；手填数组不能独立成为正式输入。Execution assumption 仍为独立的 `v1.0.0`：主结果双向不利 50 bps、0/100 bps 敏感性、零 fee、全量成交限制。`NO_CANDIDATE` 不触发 Risk/Paper/Shadow；Candidate 才运行原 Risk 与 Paper，Laya 不可用时明确记录失败且不阻塞 Paper。固定 bps 是压力测试，不代表真实盘口可成交价。
 
@@ -567,6 +600,7 @@ src/
 - `src/state-store.ts` — checkpoint persistence
 - `src/reconciliation.ts` — local/exchange reconciliation
 - `src/binance-testnet.ts` — Binance Futures Testnet adapter
+- `src/perp-expression.ts` — explicit Strategy Candidate → PerpIntent contract and sizing
 - `src/closure-smoke.ts` — authenticated Binance + real Laya joint closure smoke
 - `src/historical-replay.ts` — historical research runner
 - `src/overlay/strategy-lab.ts` — frozen 1m Candidate admission protocol
@@ -597,8 +631,9 @@ README 只描述**当前系统形态**。完整设计依据、故障案例、AI 
 
 | 验证层级 | 当前状态 | 目标 |
 | --- | --- | --- |
-| 模拟盘 / 测试网（Paper / Testnet） | 当前主线 | 验证策略、订单生命周期、仓位、保证金、恢复与对账 |
-| 小额真实资金验证（Live Micro-Capital Validation） | 下一阶段，尚未完成 | 用受控小额资金验证真实 API、ACK / Fill、手续费、资金费和交易所权威状态 |
+| P0 确定性 Perp Core（Deterministic Paper） | `Perp Execution Validation v1.0.0` 已通过 | 验证显式 target 到订单生命周期、仓位、保证金、fee/funding/PnL 与模拟强平边界 |
+| P1 认证测试网（Authenticated Testnet） | 显式 `FLAT → LONG 0.001 → FLAT` 已通过；最终权威对账一致 | 已验证真实 API、ACK / Fill、fee、交易所权威仓位与最终对账；本次短时往返未跨 funding settlement |
+| P2 小额真实资金（Live Micro-Capital Validation） | 尚未授权、尚未完成 | 用受控小额资金验证实际成交、手续费、资金费和 venue 行为 |
 | 生产级实盘（Production-grade Live Trading） | 非当前项目范围 | 需要进一步具备高可用、完整监控、事故恢复、资金安全与长期无人值守能力 |
 
 当前明确不包含：

@@ -1,6 +1,6 @@
 export type PositionSide = "FLAT" | "LONG" | "SHORT";
 export type OrderSide = "BUY" | "SELL";
-export type SignalAction = "HOLD" | "LONG" | "SHORT";
+export type SignalAction = "HOLD" | PositionSide;
 
 export type Tick = {
   seq: number;
@@ -16,6 +16,8 @@ export type Tick = {
 
 export type Signal = {
   action: SignalAction;
+  /** Optional target quantity from an explicitly authorized PerpIntent. */
+  targetQty?: number;
   shortMa: number | null;
   longMa: number | null;
   reason: string;

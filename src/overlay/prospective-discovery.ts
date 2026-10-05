@@ -18,6 +18,23 @@ type DiscoverySourceUrl =
   | typeof POLYMARKET_DISCOVERY_SOURCE_URL
   | typeof POLYMARKET_LEGACY_DISCOVERY_SOURCE_URL;
 
+type LegacyAcquisitionClock = {
+  readonly basis: "POLYMARKET_HTTP_DATE";
+  readonly sourceDate: number;
+  readonly localRequestStartedAt: number;
+  readonly localResponseReceivedAt: number;
+  readonly midpointOffsetMs: number;
+};
+
+type ActiveAcquisitionClock = {
+  readonly basis: "POLYMARKET_HTTP_DATE_PLUS_AGE";
+  readonly sourceDate: number;
+  readonly responseAgeSeconds: number;
+  readonly localRequestStartedAt: number;
+  readonly localResponseReceivedAt: number;
+  readonly midpointOffsetMs: number;
+};
+
 export type DiscoveryDisposition =
   | "POTENTIAL_FDV_REVIEW"
   | "IGNORED_NON_FDV_TEXT"
@@ -50,13 +67,7 @@ export type MarketDiscoveryRecord = {
     readonly rawResponsePath: string;
     readonly sha256: string;
   };
-  readonly acquisitionClock: {
-    readonly basis: "POLYMARKET_HTTP_DATE";
-    readonly sourceDate: number;
-    readonly localRequestStartedAt: number;
-    readonly localResponseReceivedAt: number;
-    readonly midpointOffsetMs: number;
-  };
+  readonly acquisitionClock?: LegacyAcquisitionClock | ActiveAcquisitionClock;
 };
 
 export type DiscoveryScanRecord = {
@@ -67,7 +78,7 @@ export type DiscoveryScanRecord = {
   readonly retrievedAt: number;
   readonly rawResponsePath: string;
   readonly sha256: string;
-  readonly acquisitionClock: MarketDiscoveryRecord["acquisitionClock"];
+  readonly acquisitionClock: ActiveAcquisitionClock;
   readonly coverage: {
     readonly ordering: "POLYMARKET_SEARCH_RELEVANCE";
     readonly limit: 50;
@@ -120,13 +131,17 @@ export async function runPolymarketDiscoveryScan(
   if (localResponseReceivedAt < localRequestStartedAt) throw new Error("local discovery clock moved backward");
   const sourceDate = httpDate(response.headers.get("date"));
   if (sourceDate === null) throw new Error("Polymarket Gamma response Date header is missing or invalid");
-  const retrievedAt = sourceDate;
-  const acquisitionClock: MarketDiscoveryRecord["acquisitionClock"] = {
-    basis: "POLYMARKET_HTTP_DATE",
+  const responseAgeSeconds = httpAge(response.headers.get("age"));
+  if (responseAgeSeconds === null) throw new Error("Polymarket Gamma response Age header is invalid");
+  const retrievedAt = sourceDate + (responseAgeSeconds * 1_000);
+  if (!Number.isSafeInteger(retrievedAt)) throw new Error("Polymarket Gamma effective response time is invalid");
+  const acquisitionClock: ActiveAcquisitionClock = {
+    basis: "POLYMARKET_HTTP_DATE_PLUS_AGE",
     sourceDate,
+    responseAgeSeconds,
     localRequestStartedAt,
     localResponseReceivedAt,
-    midpointOffsetMs: sourceDate - ((localRequestStartedAt + localResponseReceivedAt) / 2)
+    midpointOffsetMs: retrievedAt - ((localRequestStartedAt + localResponseReceivedAt) / 2)
   };
   const payload = parseFdvCryptoSearch(raw);
   const digest = sha256(raw);
@@ -201,7 +216,7 @@ function parseMarket(
   rawPath: string,
   root: string,
   digest: string,
-  acquisitionClock: MarketDiscoveryRecord["acquisitionClock"]
+  acquisitionClock: ActiveAcquisitionClock
 ): MarketDiscoveryRecord {
   if (!isRecord(value) || !nonEmptyString(value.id)) {
     throw new Error("Gamma response contains a market without an id");
@@ -337,6 +352,13 @@ function httpDate(value: string | null): number | null {
   if (value === null) return null;
   const result = Date.parse(value);
   return Number.isFinite(result) && result >= 0 ? result : null;
+}
+
+function httpAge(value: string | null): number | null {
+  if (value === null) return 0;
+  if (!/^\d+$/.test(value)) return null;
+  const result = Number(value);
+  return Number.isSafeInteger(result) ? result : null;
 }
 
 function nullableBoolean(value: unknown): boolean | null {

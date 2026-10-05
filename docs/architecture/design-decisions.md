@@ -136,3 +136,7 @@ Research Signal
 ```
 
 `Trading Thesis → PerpIntent` 仍是业务语义，不允许代码生成工具自行补全。
+
+`Perp Expression v1.0.0` 已把该边界实现成显式 admission contract。一个在 Candidate T0 之前冻结的 policy 必须选择 `SIGNAL_ONLY / DIRECTIONAL_PROXY / HEDGE`，并在执行模式下显式给出 side、风险预算、杠杆上限、stop distance 和有效期。没有 policy、post-hoc policy 或 symbol/market mismatch 都不生成 intent。
+
+这只解决“如何安全表达已批准的业务语义”，不替业务研究决定方向。当前 Crypto FDV Variant 没有 active perp policy，因此仍不能声称 `BUY_YES → LONG perp`。

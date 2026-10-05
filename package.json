@@ -9,6 +9,8 @@
   "scripts": {
     "start": "node --experimental-strip-types src/index.ts",
     "demo": "node --experimental-strip-types src/interview-demo.ts",
+    "validate:perp": "node --experimental-strip-types src/perp-execution-validation.ts",
+    "validate:perp:testnet": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/perp-testnet-validation.ts",
     "smoke:closure": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/closure-smoke.ts",
     "testnet:market": "node --experimental-strip-types src/testnet-market-smoke.ts",
     "testnet": "node --experimental-strip-types src/testnet-index.ts",
