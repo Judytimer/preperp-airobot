@@ -95,3 +95,34 @@ manifest 一旦写入不更新。state 可以推进，但它只引用 checksum-p
 - 真实 blocker。
 
 不得因第一轮 qualified 数量少而修改 strike selection、120s freshness、strict cutoff 或 owner-event rule。
+
+## 7. 首轮真实 prospective 结果
+
+有效运行时间：`2026-10-05T16:20:15.581Z`
+
+collector commit：`56d8029555129d60fe8edeb58e48977bfd306bf3`
+
+```yaml
+clock:
+  source: BINANCE_SERVER_TIME
+  synchronizedAt: 2026-10-05T16:20:10.942Z
+  hostOffsetMs: 638531
+  roundTripMs: 349
+discoveredEpisodes: 18
+registeredEpisodes: 18
+cohorts:
+  BTC: 6
+  ETH: 6
+  SOL: 6
+admission:
+  REGISTERED_WAITING_TRIGGER: 18
+  QUALIFIED: 0
+  DATA_BLOCKED: 0
+  NOT_TRIGGERED_BEFORE_CUTOFF: 0
+```
+
+另有 2 个 search results 因 event slug 没有冻结 month/day/year 而 fail closed，未注册、未进入 cohort。18/18 manifests 均通过 frozen evaluator，全部记录同一远端 commit；18 个 episode key 无重复，`cutoffT0 = measurementAt - 4h` 无偏差，27 个唯一 raw artifact references 的 SHA-256 校验全部通过。
+
+在有效运行前的 preflight 曾暴露 host clock 比 Binance server time 慢约 10.6 分钟。该批输出已隔离到 `work/price-target-v1-quarantine-clock-skew-20261005/`，明确不属于 prospective cohort；它没有被删除，也没有回填到有效结果。修复只增加 server-time clock synchronization，不改变 admission、strike、T0、cutoff 或 execution authority。
+
+首轮结论：`WAITING_FOR_FIRST_QUALIFIED_PRICE_TARGET — STOP`。
