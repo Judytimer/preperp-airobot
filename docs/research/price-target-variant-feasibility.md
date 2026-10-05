@@ -100,15 +100,15 @@ one asset × one measurement episode
 8. selected strike 不得因数据缺失、流动性或后续结果而切换；
 9. 原策略仍是 Prediction `BUY_YES`，不自动映射成 Perp LONG/SHORT。
 
-协议 v1 已冻结，但 collector、manifest、schema 和 evaluator 尚未实现，因此 Variant 2 仍未开始收集 evidence。
+协议 v1 已冻结；manifest、schema、纯 evaluator 与 collector 已按协议实现。它仍然只有 research admission 权限，不连接 Strategy 或 Execution。
 
 ## 6. 当前 verdict
 
 ```text
 MARKET_SUPPLY_FEASIBLE
 → ADMISSION PROTOCOL v1.0.0 FROZEN
-→ NOT COLLECTING
+→ COLLECTOR IMPLEMENTED
 → DO NOT IMPLEMENT EXECUTION
 ```
 
-Variant 2 将拥有独立 manifest、独立 cohort 和独立 Directional Study；不得与 FDV v2.1.1 的 0/10 混合累计。下一阶段只有在明确开启后，才实现这份 admission contract；本轮不写 collector 或交易代码。
+Variant 2 拥有独立 manifest 与独立 cohort；不得与 FDV v2.1.1 的 0/10 混合累计。collector 只实现 prospective admission，不写 Strategy、Directional Study 或交易代码。

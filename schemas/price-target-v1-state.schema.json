@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Judytimer/preperp-airobot/schemas/price-target-v1-state.schema.json",
+  "title": "Price-Target Variant v1 Derived Admission State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "manifestId", "status", "updatedAt", "candles", "books", "marketStatuses", "artifacts", "candidate", "reasons"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "manifestId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["REGISTERED_WAITING_TRIGGER", "QUALIFIED", "DATA_BLOCKED", "NOT_TRIGGERED_BEFORE_CUTOFF"] },
+    "updatedAt": { "$ref": "#/$defs/timestamp" },
+    "candles": { "type": "array", "items": { "$ref": "#/$defs/candle" } },
+    "books": { "type": "array", "items": { "$ref": "#/$defs/book" } },
+    "marketStatuses": { "type": "array", "items": { "$ref": "#/$defs/marketStatus" } },
+    "artifacts": { "type": "array", "items": { "$ref": "price-target-v1-manifest.schema.json#/$defs/artifact" } },
+    "candidate": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidateId", "candidateT0", "crossingPreviousClose", "crossingClose", "selectedStrike", "entryBestAsk", "entryBestAskSize", "yesBookObservedAt"],
+          "properties": {
+            "candidateId": { "type": "string", "minLength": 1 },
+            "candidateT0": { "$ref": "#/$defs/timestamp" },
+            "crossingPreviousClose": { "type": "number", "exclusiveMinimum": 0 },
+            "crossingClose": { "type": "number", "exclusiveMinimum": 0 },
+            "selectedStrike": { "type": "number", "exclusiveMinimum": 0 },
+            "entryBestAsk": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+            "entryBestAskSize": { "type": "number", "exclusiveMinimum": 0 },
+            "yesBookObservedAt": { "$ref": "#/$defs/timestamp" }
+          }
+        }
+      ]
+    },
+    "reasons": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "timestamp": { "type": "number", "minimum": 0 },
+    "candle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["openTime", "closeTime", "close"],
+      "properties": {
+        "openTime": { "$ref": "#/$defs/timestamp" },
+        "closeTime": { "$ref": "#/$defs/timestamp" },
+        "close": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "book": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observedAt", "retrievedAt", "marketId", "yesAssetId", "bestBid", "bestBidSize", "bestAsk", "bestAskSize", "minOrderSize", "tickSize", "hash", "artifact"],
+      "properties": {
+        "observedAt": { "$ref": "#/$defs/timestamp" },
+        "retrievedAt": { "$ref": "#/$defs/timestamp" },
+        "marketId": { "type": "string", "minLength": 1 },
+        "yesAssetId": { "type": "string", "minLength": 1 },
+        "bestBid": { "type": ["number", "null"] },
+        "bestBidSize": { "type": ["number", "null"] },
+        "bestAsk": { "type": ["number", "null"] },
+        "bestAskSize": { "type": ["number", "null"] },
+        "minOrderSize": { "type": "number", "exclusiveMinimum": 0 },
+        "tickSize": { "type": "number", "exclusiveMinimum": 0 },
+        "hash": { "type": "string", "minLength": 1 },
+        "artifact": { "$ref": "price-target-v1-manifest.schema.json#/$defs/artifact" }
+      }
+    },
+    "marketStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observedAt", "marketId", "active", "closed", "acceptingOrders", "enableOrderBook", "artifact"],
+      "properties": {
+        "observedAt": { "$ref": "#/$defs/timestamp" },
+        "marketId": { "type": "string", "minLength": 1 },
+        "active": { "type": "boolean" },
+        "closed": { "type": "boolean" },
+        "acceptingOrders": { "type": "boolean" },
+        "enableOrderBook": { "type": "boolean" },
+        "artifact": { "$ref": "price-target-v1-manifest.schema.json#/$defs/artifact" }
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 # Concrete Variant 2：Price-Target Admission Protocol v1.0.0
 
 日期：2026-10-05
-状态：**FROZEN / NOT COLLECTING / NO EXECUTION AUTHORITY**
+状态：**FROZEN / COLLECTOR IMPLEMENTED / NO EXECUTION AUTHORITY**
 
 ## 1. 研究问题与边界
 
@@ -195,7 +195,7 @@ REGISTERED_WAITING_TRIGGER
 - 当前 `Directional Study v1.1` 只服务 FDV batch，不能直接累计本 Variant 样本；
 - Variant 2 若进入 Directional Study，必须拥有独立 qualification、独立 cohort 与独立 pre-registration；
 - admission `QUALIFIED` 只代表可以记录原策略 `BUY_YES` evidence，不代表 alpha、Perp 方向或任何交易授权；
-- collector、manifest、schema 或 evaluator 尚未实现，因此当前状态仍是 `NOT COLLECTING`。
+- manifest、schema、纯 evaluator 与 collector 已按本协议实现；实现本身仍是 research-only，不改变任何 Execution 权限。运行说明见 [Prospective Admission Collector](price-target-collector-v1.md)。
 
 ## 11. 官方数据接口依据
 
@@ -221,4 +221,4 @@ minimum executable book admission
 fail-closed / no fallback behavior
 ```
 
-任何改变都必须新建协议版本；不得修改已经注册的 episode 或 Candidate。下一阶段若被明确开启，只允许实现与验证这份 admission contract，不得同时扩展 Execution。
+任何改变都必须新建协议版本；不得修改已经注册的 episode 或 Candidate。collector 只实现与验证这份 admission contract，不得同时扩展 Execution。

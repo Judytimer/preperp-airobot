@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Judytimer/preperp-airobot/schemas/price-target-v1-manifest.schema.json",
+  "title": "Price-Target Variant v1 Immutable Episode Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "protocolVersion", "manifestId", "repositoryCommit", "cohortKey", "discoveredAt", "registeredAt", "episode", "ownerEvent", "registration"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "protocolVersion": { "const": "PRICE_TARGET_ADMISSION_V1_0_0" },
+    "manifestId": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+    "repositoryCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "cohortKey": { "enum": ["PRICE_TARGET_V1_BTC", "PRICE_TARGET_V1_ETH", "PRICE_TARGET_V1_SOL"] },
+    "discoveredAt": { "$ref": "#/$defs/timestamp" },
+    "registeredAt": { "$ref": "#/$defs/timestamp" },
+    "episode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["episodeKey", "asset", "resolutionVenue", "resolutionSymbol", "measurementAt", "cutoffT0"],
+      "properties": {
+        "episodeKey": { "type": "string", "minLength": 1 },
+        "asset": { "enum": ["BTC", "ETH", "SOL"] },
+        "resolutionVenue": { "const": "BINANCE_SPOT" },
+        "resolutionSymbol": { "enum": ["BTCUSDT", "ETHUSDT", "SOLUSDT"] },
+        "measurementAt": { "$ref": "#/$defs/timestamp" },
+        "cutoffT0": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "ownerEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventId", "slug", "title", "rules", "rawDiscovery"],
+      "properties": {
+        "eventId": { "type": "string", "pattern": "^[0-9]+$" },
+        "slug": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "rules": { "type": "string", "minLength": 1 },
+        "rawDiscovery": { "$ref": "#/$defs/artifact" }
+      }
+    },
+    "registration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spotCandle", "spotArtifact", "registrationSpot", "completeStrikeLadder", "selectedStrike", "selectedMarketId", "selectedQuestion", "yesAssetId"],
+      "properties": {
+        "spotCandle": { "$ref": "#/$defs/candle" },
+        "spotArtifact": { "$ref": "#/$defs/artifact" },
+        "registrationSpot": { "type": "number", "exclusiveMinimum": 0 },
+        "completeStrikeLadder": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["marketId", "question", "strike", "yesAssetId", "active", "closed", "acceptingOrders", "enableOrderBook"],
+            "properties": {
+              "marketId": { "type": "string", "minLength": 1 },
+              "question": { "type": "string", "minLength": 1 },
+              "strike": { "type": "number", "exclusiveMinimum": 0 },
+              "yesAssetId": { "type": "string", "minLength": 1 },
+              "active": { "type": "boolean" },
+              "closed": { "type": "boolean" },
+              "acceptingOrders": { "type": "boolean" },
+              "enableOrderBook": { "type": "boolean" }
+            }
+          }
+        },
+        "selectedStrike": { "type": "number", "exclusiveMinimum": 0 },
+        "selectedMarketId": { "type": "string", "minLength": 1 },
+        "selectedQuestion": { "type": "string", "minLength": 1 },
+        "yesAssetId": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "timestamp": { "type": "number", "minimum": 0 },
+    "candle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["openTime", "closeTime", "close"],
+      "properties": {
+        "openTime": { "$ref": "#/$defs/timestamp" },
+        "closeTime": { "$ref": "#/$defs/timestamp" },
+        "close": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sourceUrl", "retrievedAt", "path", "sha256"],
+      "properties": {
+        "kind": { "enum": ["POLYMARKET_GAMMA", "BINANCE_SPOT_KLINES", "POLYMARKET_CLOB_BOOK"] },
+        "sourceUrl": { "type": "string", "pattern": "^https://" },
+        "retrievedAt": { "$ref": "#/$defs/timestamp" },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

@@ -20,6 +20,9 @@
     "manifest:check": "node --experimental-strip-types src/overlay/prospective-manifest.ts",
     "strategy-lab:replay": "node --env-file-if-exists=.env --experimental-strip-types src/overlay/prospective-runner.ts",
     "prospective:outcome": "node --experimental-strip-types src/overlay/prospective-outcome.ts",
+    "price-target:manifest": "node --experimental-strip-types src/overlay/price-target-admission.ts",
+    "price-target:collect": "node --experimental-strip-types src/overlay/price-target-collector.ts",
+    "price-target:watch": "node --experimental-strip-types src/overlay/price-target-collector.ts --watch",
     "replay": "node --experimental-strip-types src/replay-index.ts",
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },

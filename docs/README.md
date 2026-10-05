@@ -46,7 +46,8 @@
 - [Strategy Thesis × Variant × Formal Batch：策略边界纠偏说明](research/strategy-thesis-boundary-correction.md) — 先分清“上层研究假设、当前具体策略、当前冻结实验批次”，避免把 Crypto-FDV v2.1 误当成整个策略定义。
 - [Directional Study v1.1：分级授权预注册协议](research/directional-study-v1.md) — 3 个样本只解锁 Testnet review，10 个样本才解锁 Micro-Capital review；两级都不自动交易。
 - [Concrete Variant 2：Crypto Price-Target Feasibility](research/price-target-variant-feasibility.md) — 真实核查 BTC/ETH/SOL fixed-time price contracts 的样本供给与独立性风险；feasibility 已完成，admission v1 已冻结，不写执行代码。
-- [Concrete Variant 2：Price-Target Admission Protocol v1.0.0](research/price-target-variant-admission-v1.md) — 冻结 episode 去重、nearest-OTM strike、首次 1m upward crossing、Candidate T0 与 fail-closed evidence admission；当前未实现 collector，也没有执行权限。
+- [Concrete Variant 2：Price-Target Admission Protocol v1.0.0](research/price-target-variant-admission-v1.md) — 冻结 episode 去重、nearest-OTM strike、首次 1m upward crossing、Candidate T0 与 fail-closed evidence admission；collector 已实现，但没有执行权限。
+- [Price-Target Variant v1：Prospective Admission Collector](research/price-target-collector-v1.md) — 最小 manifest/schema/collector 实现；持续归档 pre-T0 YES book 与 Spot 1m，只推进 research admission state，不连接 Strategy 或 Execution。
 - [AI Shadow 研究边界](research/ai-shadow.md)
 - [验证方法：Historical Replay / FORMAL / Prospective](research/validation-methodology.md)
 - [Strategy Lab 收尾：Formal 1m Protocol × PENGU](research/strategy-lab-closeout.md)
