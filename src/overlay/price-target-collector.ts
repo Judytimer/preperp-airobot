@@ -71,6 +71,7 @@ export type PriceTargetCollectorDependencies = {
 export type PriceTargetCollectorSummary = {
   readonly status: "CYCLE_RECORDED";
   readonly recordedAt: number;
+  readonly clock: PriceTargetClockEvidence;
   readonly discoveredEpisodes: number;
   readonly registeredEpisodes: number;
   readonly blockedDiscoveries: number;
@@ -83,13 +84,28 @@ export type PriceTargetCollectorSummary = {
   readonly scanPath: string;
 };
 
+export type PriceTargetClockEvidence = {
+  readonly source: "INJECTED" | "BINANCE_SERVER_TIME";
+  readonly synchronizedAt: number;
+  readonly offsetMs: number;
+  readonly roundTripMs: number;
+};
+
+type PriceTargetClock = {
+  readonly now: () => number;
+  readonly evidence: PriceTargetClockEvidence;
+};
+
 export async function runPriceTargetCollectorCycle(
   outputDirectory: string,
   dependencies: PriceTargetCollectorDependencies = {}
 ): Promise<PriceTargetCollectorSummary> {
   const fetcher = dependencies.fetcher ?? fetch;
-  const now = dependencies.now ?? Date.now;
   const timeoutMs = dependencies.timeoutMs ?? 15_000;
+  const clock = dependencies.now === undefined
+    ? await synchronizePriceTargetClock(fetcher, timeoutMs)
+    : injectedClock(dependencies.now);
+  const now = clock.now;
   const repositoryCommit = dependencies.repositoryCommit ?? currentCommit();
   if (!/^[0-9a-f]{40}$/.test(repositoryCommit)) throw new Error("repository commit is invalid");
   const root = resolve(outputDirectory);
@@ -189,6 +205,7 @@ export async function runPriceTargetCollectorCycle(
   const summaryWithoutPath = {
     status: "CYCLE_RECORDED" as const,
     recordedAt,
+    clock: clock.evidence,
     discoveredEpisodes: episodes.length,
     registeredEpisodes,
     blockedDiscoveries: blockedDiscoveries.length,
@@ -197,6 +214,51 @@ export async function runPriceTargetCollectorCycle(
   const scanPath = resolve(root, "scans", `${recordedAt}-${sha256(JSON.stringify(summaryWithoutPath)).slice(0, 12)}.json`);
   await writeImmutable(scanPath, `${JSON.stringify({ ...summaryWithoutPath, blockers: blockedDiscoveries }, null, 2)}\n`);
   return { ...summaryWithoutPath, scanPath };
+}
+
+export async function synchronizePriceTargetClock(
+  fetcher: typeof fetch = fetch,
+  timeoutMs = 15_000,
+  localNow: () => number = Date.now
+): Promise<PriceTargetClock> {
+  const startedAt = localNow();
+  const response = await fetcher("https://api.binance.com/api/v3/time", {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  const finishedAt = localNow();
+  if (!response.ok) throw new Error(`Binance server time HTTP ${response.status}`);
+  let payload: unknown;
+  try { payload = await response.json(); } catch { throw new Error("Binance server time is not valid JSON"); }
+  if (!isRecord(payload)) throw new Error("Binance server time payload is malformed");
+  const serverTime = timestamp(payload.serverTime, "Binance serverTime");
+  const roundTripMs = finishedAt - startedAt;
+  if (!Number.isSafeInteger(roundTripMs) || roundTripMs < 0 || roundTripMs > timeoutMs) {
+    throw new Error("Binance server time round trip is invalid");
+  }
+  const localMidpoint = startedAt + Math.round(roundTripMs / 2);
+  const offsetMs = serverTime - localMidpoint;
+  return {
+    now: () => localNow() + offsetMs,
+    evidence: {
+      source: "BINANCE_SERVER_TIME",
+      synchronizedAt: serverTime,
+      offsetMs,
+      roundTripMs
+    }
+  };
+}
+
+function injectedClock(now: () => number): PriceTargetClock {
+  return {
+    now,
+    evidence: {
+      source: "INJECTED",
+      synchronizedAt: now(),
+      offsetMs: 0,
+      roundTripMs: 0
+    }
+  };
 }
 
 export function parsePriceTargetSearch(

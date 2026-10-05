@@ -6,10 +6,28 @@ import test from "node:test";
 
 import {
   parsePriceTargetSearch,
-  runPriceTargetCollectorCycle
+  runPriceTargetCollectorCycle,
+  synchronizePriceTargetClock
 } from "../src/overlay/price-target-collector.ts";
 
 const NOW = Date.parse("2026-10-05T14:00:30Z");
+
+test("synchronizes the evidence clock to Binance server time instead of the host clock", async () => {
+  let localNow = 1_000;
+  const clock = await synchronizePriceTargetClock(
+    async () => {
+      localNow = 1_040;
+      return json(JSON.stringify({ serverTime: 10_020 }));
+    },
+    1_000,
+    () => localNow
+  );
+
+  assert.equal(clock.evidence.source, "BINANCE_SERVER_TIME");
+  assert.equal(clock.evidence.roundTripMs, 40);
+  assert.equal(clock.evidence.offsetMs, 9_000);
+  assert.equal(clock.now(), 10_040);
+});
 
 test("parses measurementAt from slug plus frozen ET rules and preserves the full strike ladder", () => {
   const raw = search([event("100", "bitcoin-above-on-october-6-2026")]);
@@ -31,6 +49,7 @@ test("one real-shaped collector cycle freezes registration and starts continuous
   });
 
   assert.equal(result.registeredEpisodes, 1);
+  assert.equal(result.clock.source, "INJECTED");
   assert.equal(result.admission.waiting, 1);
   assert.equal(result.admission.qualified, 0);
   const manifestName = (await readdir(join(directory, "manifests")))[0];

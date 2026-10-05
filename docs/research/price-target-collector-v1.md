@@ -45,6 +45,8 @@ npm run price-target:watch
 
 单轮模式用于可控验证；正式 prospective 运行必须使用 watch 或等价的 60 秒 scheduler。只在 crossing 后启动 collector 不满足协议，因为无法证明 latest-known pre-T0 YES book。
 
+生产运行在写入 evidence 前必须先读取 Binance public server time，并以本轮冻结的 offset 建立权威 evidence clock。scan report 保存 clock source、host offset 和 round-trip time；这防止 host clock drift 悄悄改变 registration candle、`candidateT0`、cutoff 比较或 YES book 的 120 秒 freshness。测试可以显式注入 deterministic clock。
+
 检查单个 immutable manifest：
 
 ```bash
