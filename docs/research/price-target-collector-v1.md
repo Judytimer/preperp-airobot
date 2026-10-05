@@ -126,3 +126,22 @@ admission:
 在有效运行前的 preflight 曾暴露 host clock 比 Binance server time 慢约 10.6 分钟。该批输出已隔离到 `work/price-target-v1-quarantine-clock-skew-20261005/`，明确不属于 prospective cohort；它没有被删除，也没有回填到有效结果。修复只增加 server-time clock synchronization，不改变 admission、strike、T0、cutoff 或 execution authority。
 
 首轮结论：`WAITING_FOR_FIRST_QUALIFIED_PRICE_TARGET — STOP`。
+
+## 8. 持续运行与首个 trigger cluster
+
+`STOP` 只表示停止开发，不表示停止 evidence collection。首轮 registration 后，collector 必须继续使用 `price-target:watch` 或等价 60 秒 scheduler；否则 crossing 发生时无法取得 fresh pre-T0 YES book。
+
+持续运行首次产生：
+
+```yaml
+contractLevelQualified: 7
+independentTriggerClusters: 1
+dataBlocked: 12
+waiting: 1
+```
+
+12 个 `DATA_BLOCKED`（ETH 6、SOL 6）永久保留。它们在约 6 小时采集空档内发生 crossing，但 registration book 距 T0 超过 120 秒，因此不得回填。
+
+7 个 BTC Candidates 共享 `asset=BTC`、`candidateT0=2026-10-05T22:20:00.000Z`、`selectedStrike=86000` 和同一 underlying crossing。它们仍是 7 个合法 Prediction contracts，但按 [Study Independence Rule v1.0.0](price-target-variant-study-independence-v1.md) 只形成 1 个 independent trigger cluster。
+
+当前运行结论：`KEEP COLLECTOR RUNNING / STOP DEVELOPMENT`。
