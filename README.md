@@ -539,6 +539,8 @@ TradeCandidate
 
 没有冻结 mapping 时只产生 `NO_INTENT / BLOCKED`；`BUY_YES` 不会自行推导 perp 方向。当前 Crypto FDV Variant 仍未激活为可交易 perp policy。详见 [Strategy Signal → Perp Position Expression](docs/research/perp-position-expression.md)。
 
+`Directional Study v1.0.0` 已预注册并保持纯研究边界：只对前 10 个 qualified prospective Candidates 比较 4h `LONG hypothesis` 与 `SHORT hypothesis`。1h、YES change、funding 与 `measurementAt` 仅独立报告；两种方向均未通过冻结 gate 时结论为 `NO_DIRECTIONAL_EVIDENCE → SIGNAL_ONLY → STOP`。Evaluator 不生成 `PerpIntent`、不连接 Risk / Execution。详见 [Directional Study v1](docs/research/directional-study-v1.md)。
+
 当前 AI 只运行于 Shadow Mode。
 
 运行：
@@ -601,6 +603,7 @@ src/
 - `src/reconciliation.ts` — local/exchange reconciliation
 - `src/binance-testnet.ts` — Binance Futures Testnet adapter
 - `src/perp-expression.ts` — explicit Strategy Candidate → PerpIntent contract and sizing
+- `src/directional-study.ts` — frozen, execution-free LONG/SHORT hypothesis evaluator
 - `src/closure-smoke.ts` — authenticated Binance + real Laya joint closure smoke
 - `src/historical-replay.ts` — historical research runner
 - `src/overlay/strategy-lab.ts` — frozen 1m Candidate admission protocol
