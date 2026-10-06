@@ -73,14 +73,14 @@ authenticated venue evidence
 
 Strategy Lab 的 Formal Candidate admission 已冻结为 1-minute closed candle protocol v1.0.0；PENGU 的逐笔 / 1m 差异归类为 `MICROSTRUCTURE_SENSITIVE` 方法发现，不通过修改 Strategy 消除。
 
-当前主线切换为 freeze 后的 prospective sampling。更多历史案例只在能验证**尚未解决的方法问题**时重新打开；PENGU 缺少完整归档 raw artifact，因此不计作 FORMAL sample，这一点不阻塞阶段收尾。
+主项目已用一条 MA Paper lifecycle 和一条 Prediction `BUY_YES → SELL_YES` Paper round trip 完成作品验收。Prospective sampling、Stage A/B 与 alpha 判断全部转为 Optional / Future Research；只有未来明确需要回答方向证据时才恢复 collector。PENGU 缺少完整归档 raw artifact，因此不计作 FORMAL sample，这一点不影响主项目完成。
 
 更多 FORMAL Case 仍只接受 archived input + measurable outcome。  
 MFE / MAE 只有在 final outcome 隐藏路径风险时才加。
 
 ## F. AI 研究
 
-延期：memory-sensitivity、primary-source authentication、reviewer stability、bounded AI gating，以及用 prospective evidence 激活某个具体的 Prediction → Perp mapping。
+延期：memory-sensitivity、primary-source authentication、reviewer stability、bounded AI gating、Stage A/B，以及用 prospective evidence 激活某个具体的 Prediction → Perp mapping。
 
 `Prediction Signal → PerpIntent` 的通用语义桥已由 `Perp Expression v1.0.0` 实现：pre-T0 frozen policy、market/symbol admission、`SIGNAL_ONLY / DIRECTIONAL_PROXY / HEDGE`、risk/leverage/position-bounded sizing，以及 stop/expiry latch。当前 FDV Variant 没有 active directional/hedge policy；这项业务选择继续由证据触发，不从 `BUY_YES` 自动推断。
 

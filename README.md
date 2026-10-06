@@ -16,8 +16,19 @@
 - AI Shadow Reviewer：AI 可以辅助判断，但不能直接控制真实交易执行
 - Historical Replay：用于验证策略假设，而不是事后包装收益
 
-当前默认模式仍然是 **Paper Trading / Binance Futures Testnet**。  
-仓库当前主线不启用真钱自动交易；在 Paper / Testnet 工程闭环稳定后，项目允许进入受控的 **小额真实资金验证（Live Micro-Capital Validation）**，用于验证模拟环境难以完全覆盖的真实交易行为。
+当前默认模式仍然是 **Paper Trading / Binance Futures Testnet**。主项目已经按两条最小作品闭环收尾：
+
+```text
+Moving Average Paper
+Market → MA Signal → Risk → Order → ACK/Fill → Position
+
+Prediction Strategy Paper
+Candidate → BUY_YES → Risk → Paper Fill → Position → SELL_YES → FLAT → realized PnL
+```
+
+2026-10-06 的可重复演示结果：`npm run demo` 完成 MA 驱动的 `LONG 0.01` ACK / partial fills / position；`npm run overlay` 完成 DOGE `BUY_YES @ 0.35 → SELL_YES @ 0.72 → shares 0`，realized PnL 为 `105.71428545`。第二条只证明原生 Prediction 策略能够驱动完整 Paper 生命周期；该 fixture 不证明 alpha、统计显著性或 Perp 方向。
+
+仓库当前主线不启用真钱自动交易。Prediction → Perp directional mapping、Stage A/B prospective study 与 Live Micro-Capital 全部属于 **Optional / Future Research**，不再阻塞主项目完成。
 
 小额真实资金验证的目标是验证关键业务假设，而不是把研究系统包装成生产级实盘系统。即使完成真实资金验证，项目也不会因此宣称具备 7×24 无人值守、高可用、机构级风控或大资金安全能力。
 
@@ -539,9 +550,9 @@ TradeCandidate
 
 没有冻结 mapping 时只产生 `NO_INTENT / BLOCKED`；`BUY_YES` 不会自行推导 perp 方向。当前 Crypto FDV Variant 仍未激活为可交易 perp policy。详见 [Strategy Signal → Perp Position Expression](docs/research/perp-position-expression.md)。
 
-`Directional Study v1.1.0` 已预注册为分级授权：首 3 个 qualified prospective Candidates 只冻结 provisional direction，并最多解锁 strategy-generated Testnet 的显式审核；完整 10 个样本才运行原 70% formal gate，并最多解锁 Micro-Capital 审核。任何 stage 都不自动生成 `PerpIntent` 或下单；1h、YES change、funding 与 `measurementAt` 仍只独立报告。详见 [Directional Study v1.1](docs/research/directional-study-v1.md)。
+`Directional Study v1.1.0` 保留为 Optional / Future Research：首 3 个 qualified prospective Candidates 最多解锁 strategy-generated Testnet 的显式审核；完整 10 个样本才最多解锁 Micro-Capital 审核。它不再是主项目收尾条件，任何 stage 也不自动生成 `PerpIntent` 或下单。详见 [Directional Study v1.1](docs/research/directional-study-v1.md)。
 
-首次真实 FDV discovery 的 `426 observed / 33 new potential / 0 qualified` 已构成启动第二 Concrete Variant 设计研究的证据。BTC/ETH/SOL fixed-time price-threshold markets 的 prospective 供给明显更高；Variant 2 admission v1.0.0 已冻结为“同一 asset × measurement episode 一个机会、首次发现锁定 nearest-OTM strike、第一次 1m close upward crossing 定义 Candidate T0”。collector 正持续归档 Gamma status、selected YES book 与 Binance Spot 1m raw evidence；当前有 `7` 个 contract-level QUALIFIED、`1` 个 independent BTC trigger cluster、`12` 个永久 DATA_BLOCKED 和 `1` 个 waiting。Variant 2 Study Independence v1.0.1 已在首个 cluster 的 T0+4h 结果前冻结：`asset + candidateT0` 是独立计数单位；每个 asset 按 T0 先锁定最早 3/10 个 qualified clusters，blocked 永久占位、后样本不得补位。它仍是 `RESEARCH-ONLY / NO EXECUTION AUTHORITY`，不连接 Strategy 或交易代码。详见 [Crypto Price-Target Feasibility](docs/research/price-target-variant-feasibility.md)、[Price-Target Admission Protocol v1.0.0](docs/research/price-target-variant-admission-v1.md)、[Prospective Admission Collector](docs/research/price-target-collector-v1.md) 与 [Study Independence Rule v1.0.1](docs/research/price-target-variant-study-independence-v1.md)。
+首次真实 FDV discovery 的 `426 observed / 33 new potential / 0 qualified` 已构成启动第二 Concrete Variant 设计研究的证据。BTC/ETH/SOL fixed-time price-threshold markets 的 prospective 供给明显更高；Variant 2 admission v1.0.0 已冻结。当前保存 `7` 个 contract-level QUALIFIED、`1` 个 independent BTC trigger cluster、`12` 个永久 DATA_BLOCKED 和 `2` 个 waiting。首个 BTC cluster 因没有 prospective Perp mark path 永久 `DATA_BLOCKED`，使 v1.0.1 cohort 终结为 `NO_AUTHORIZATION`。Study Independence v1.1.0 已于 `2026-10-06T12:51:02.809Z` 在 commit `f66455f` 上建立新 cohort boundary；旧 Candidate 不迁移。该 collector 现作为暂停的 Optional Research 保留，不连接 Strategy 或交易代码，也不影响主项目完成状态。详见 [Crypto Price-Target Feasibility](docs/research/price-target-variant-feasibility.md)、[Price-Target Admission Protocol v1.0.0](docs/research/price-target-variant-admission-v1.md)、[Prospective Admission Collector](docs/research/price-target-collector-v1.md)、[Study Independence Rule v1.0.1](docs/research/price-target-variant-study-independence-v1.md) 与 [Study Independence Rule v1.1.0](docs/research/price-target-variant-study-independence-v1.1.md)。
 
 当前 AI 只运行于 Shadow Mode。
 
@@ -638,7 +649,8 @@ README 只描述**当前系统形态**。完整设计依据、故障案例、AI 
 | --- | --- | --- |
 | P0 确定性 Perp Core（Deterministic Paper） | `Perp Execution Validation v1.0.0` 已通过 | 验证显式 target 到订单生命周期、仓位、保证金、fee/funding/PnL 与模拟强平边界 |
 | P1 认证测试网（Authenticated Testnet） | 显式 `FLAT → LONG 0.001 → FLAT` 已通过；最终权威对账一致 | 已验证真实 API、ACK / Fill、fee、交易所权威仓位与最终对账；本次短时往返未跨 funding settlement |
-| P2 小额真实资金（Live Micro-Capital Validation） | 尚未授权、尚未完成 | 用受控小额资金验证实际成交、手续费、资金费和 venue 行为 |
+| Prediction Strategy Paper | `BUY_YES → Fill → Position → SELL_YES → FLAT → realized PnL` 已通过 | 证明原生策略逻辑可以驱动完整模拟交易；不证明 alpha 或 Perp direction |
+| P2 小额真实资金（Live Micro-Capital Validation） | Optional / Future Research；尚未授权 | 不再是当前主项目完成条件 |
 | 生产级实盘（Production-grade Live Trading） | 非当前项目范围 | 需要进一步具备高可用、完整监控、事故恢复、资金安全与长期无人值守能力 |
 
 当前明确不包含：

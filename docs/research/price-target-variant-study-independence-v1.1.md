@@ -2,7 +2,7 @@
 
 日期：2026-10-06
 
-状态：**FROZEN / AWAITING ACTIVATION / NO EXECUTION AUTHORITY**
+状态：**FROZEN / COLLECTING / NO EXECUTION AUTHORITY**
 
 v1.1.0 是新的 prospective cohort，不修复、不续接 v1.0.1。启动它的唯一依据是 v1.0.1 真实运行暴露了一个 blocking instrumentation gap：collector 没有归档协议要求的 underlying Perp mark path，因此首个 BTC locked cluster 合法终结为 `DATA_BLOCKED`。
 
@@ -101,3 +101,20 @@ public Perp mark source
 ```
 
 它不修改 Price-Target Admission、Strategy、Risk、Execution、Perp Expression 或 PerpIntent，不生成订单，不解锁 Testnet，不解锁 Micro-Capital。
+
+## 7. Prospective activation
+
+首轮三资产 mark archive 全部成功后，新 cohort 已不可变激活：
+
+```yaml
+activatedAt: 2026-10-06T12:51:02.809Z
+repositoryCommit: f66455f04825c1746f6def2d75277f21425a31c4
+candidateBoundary: candidateT0 > 2026-10-06T12:51:02.809Z
+firstArtifacts:
+  BTC: c7084b5365ac0f5296d8cab385f7d63b829f3c328010152cc74d41a3ab41a850
+  ETH: 7dd421d342c7d190a06b0bd61bfa2183e1b7d85ce4408ec23284d288bb3bc6fe
+  SOL: 65d609d24c9f379f230d7f2cb855ee39b16adac73d42480a65dc0cb86d7fbec9
+checksumFailures: 0
+```
+
+Activation 之前的 7 个 contract-level Candidates 和 BTC Cluster #1 不属于 v1.1.0。新 cohort 当前为 `0 locked clusters`；只有 boundary 后新出现的 qualified cluster 才能占 slot。
