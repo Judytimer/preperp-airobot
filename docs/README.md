@@ -56,6 +56,7 @@
 - [Price-Target Variant v1：Prospective Admission Collector](research/price-target-collector-v1.md) — 最小 manifest/schema/collector 实现；持续归档 pre-T0 YES book 与 Spot 1m，只推进 research admission state，不连接 Strategy 或 Execution。
 - [Price-Target Variant 2：Study Independence Rule v1.0.1](research/price-target-variant-study-independence-v1.md) — 冻结 `asset + candidateT0` trigger cluster；先按 T0 锁定最早 3/10 个 qualified clusters，blocked 永久占位且不得由后样本替换。
 - [Price-Target Variant 2：BTC Trigger Cluster #1 Outcome](research/evidence/price-target-btc-cluster-001.md) — 首个 locked BTC cluster 因缺少预先归档的 Perp mark path 永久 `DATA_BLOCKED`；32 个已有 raw artifact checksums 全部通过，禁止历史补抓修复。
+- [Price-Target Variant 2：Study Independence Rule v1.1.0](research/price-target-variant-study-independence-v1.1.md) — 保留 v1.0.1 授权失败，新增不可变 activation boundary 与 Binance Futures 1m mark-price prospective archive；旧 Candidate 不得迁移。
 - [AI Shadow 研究边界](research/ai-shadow.md)
 - [验证方法：Historical Replay / FORMAL / Prospective](research/validation-methodology.md)
 - [Strategy Lab 收尾：Formal 1m Protocol × PENGU](research/strategy-lab-closeout.md)

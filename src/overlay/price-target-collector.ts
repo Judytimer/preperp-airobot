@@ -21,6 +21,10 @@ import {
   type PriceTargetMarketStatusSnapshot,
   type RawArtifactReference
 } from "./price-target-admission.ts";
+import {
+  archivePriceTargetPerpMarks,
+  type PerpMarkArchiveSummary
+} from "./price-target-perp-mark-archive.ts";
 
 export const PRICE_TARGET_POLL_INTERVAL_MS = 60_000;
 export const PRICE_TARGET_SEARCH_LIMIT = 50;
@@ -75,6 +79,7 @@ export type PriceTargetCollectorSummary = {
   readonly discoveredEpisodes: number;
   readonly registeredEpisodes: number;
   readonly blockedDiscoveries: number;
+  readonly perpMarkArchive: PerpMarkArchiveSummary;
   readonly admission: {
     readonly waiting: number;
     readonly qualified: number;
@@ -110,6 +115,15 @@ export async function runPriceTargetCollectorCycle(
   if (!/^[0-9a-f]{40}$/.test(repositoryCommit)) throw new Error("repository commit is invalid");
   const root = resolve(outputDirectory);
   await mkdir(root, { recursive: true });
+
+  // This archive is intentionally independent from Admission state. It runs
+  // before discovery so a later failure cannot erase the prospective mark path.
+  const perpMarkArchive = await archivePriceTargetPerpMarks(root, {
+    fetcher,
+    now,
+    timeoutMs,
+    repositoryCommit
+  });
 
   const discoveryResults = await Promise.all(PRICE_TARGET_ASSETS.map(async (asset) => {
     const url = searchUrl(asset);
@@ -209,6 +223,7 @@ export async function runPriceTargetCollectorCycle(
     discoveredEpisodes: episodes.length,
     registeredEpisodes,
     blockedDiscoveries: blockedDiscoveries.length,
+    perpMarkArchive,
     admission: counts
   };
   const scanPath = resolve(root, "scans", `${recordedAt}-${sha256(JSON.stringify(summaryWithoutPath)).slice(0, 12)}.json`);

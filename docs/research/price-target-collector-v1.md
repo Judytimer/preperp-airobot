@@ -22,6 +22,7 @@ Gamma discovery
 
 - `src/overlay/price-target-admission.ts`：纯 manifest 与 admission evaluator；
 - `src/overlay/price-target-collector.ts`：公开数据抓取、raw archive 和状态推进；
+- `src/overlay/price-target-perp-mark-archive.ts`：Study v1.1.0 的独立 Binance Futures 1m mark-price prospective archive；
 - `schemas/price-target-v1-manifest.schema.json`：不可变 registration manifest；
 - `schemas/price-target-v1-state.schema.json`：可由 raw evidence 重建的 derived state；
 - `test/price-target-admission.test.ts`：cutoff、T0、nearest-OTM、pre-T0 book 边界；
@@ -82,6 +83,8 @@ work/price-target-v1/
     ├── spot/    Binance Spot 1m kline payloads
     └── books/   selected YES CLOB order books
 ```
+
+`directional-v1.1/` 与 Admission state 隔离：它包含不可变 `activation.json`、每轮 `cycles/` index，以及 BTC/ETH/SOL 的 `raw/perp-mark/` payload。Perp mark archive 在 discovery 之前运行，因此后续 Gamma/CLOB failure 不会让本轮 mark path 消失。首次归档超过 candle close 180 秒的数据不得进入新 cohort。
 
 manifest 一旦写入不更新。state 可以推进，但它只引用 checksum-protected raw artifacts；出现冲突 candle、缺失 first-crossing evidence、过期 pre-T0 book 或 market 在 T0 不可交易时 fail closed。
 
