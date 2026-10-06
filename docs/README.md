@@ -1,5 +1,7 @@
 # 文档阅读地图
 
+> 更新时间：2026-10-06
+
 这个目录不是开发日志的平铺列表，而是项目的**工程判断与证据层**。
 
 如果只想快速了解项目，请先看根目录 [README](../README.md)。README 负责回答“现在做到了什么”；这里负责回答“为什么这么设计、哪些故障逼出了这些设计、哪些事情现在故意不做”。
@@ -37,6 +39,7 @@
 - [F06：PerpBot 的交易所客户端边界](cases/f06-client-boundary.md)
 - [Cancel × Fill × Reconciliation 专项审计](cases/cancel-fill-reconciliation.md)
 - [Liquidation × Late Fill 复现实验](cases/liquidation-late-fill.md)
+- [OrderTracker 终态迟到成交：复现、修复与抽象](cases/order-tracker-late-fill.md) — 2026-10-06 真实复现 `CANCELED` 后 unique late fill 被静默拒绝；修复后保持终态但补齐成交记账，并保留 FILLED 后新 fillId throw 作为独立 failure。
 - [Binance Testnet 接管与验证记录](cases/testnet-validation.md)
 
 这些文档保留“错误假设 → Failure Case → Invariant → 设计修正”的过程。部分文档明确标记为 SUPERSEDED，它们用于解释为什么后来改设计，不代表当前最终行为。
@@ -64,7 +67,7 @@
 
 - [延期设计与触发条件](roadmap/deferred-designs.md)
 
-它不是功能愿望清单，而是回答：什么证据出现以后，才值得重新打开 Recovery Completion、S2 late fill、EventLog、更多 Perp 风险真实度或 AI gating。
+它不是功能愿望清单，而是回答：什么证据出现以后，才值得重新打开 Recovery Completion、S2 的 venue 时间语义、EventLog、更多 Perp 风险真实度或 AI gating。
 
 ## 历史归档
 

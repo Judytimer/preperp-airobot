@@ -1,5 +1,6 @@
 # 面试准备入口
 
+> 更新时间：2026-10-06  
 > 这份文档不是项目说明书，而是“怎么把这个仓库学成自己的面试能力”。
 
 如果你只想看项目现在做到了什么，先看根目录 [README](../../README.md)。  
@@ -184,10 +185,11 @@ Failure Case：
 - [F06：交易所客户端边界](../cases/f06-client-boundary.md)
 - [Cancel × Fill × Reconciliation](../cases/cancel-fill-reconciliation.md)
 - [Liquidation × Late Fill](../cases/liquidation-late-fill.md)
+- [OrderTracker 终态迟到成交：复现、修复与抽象](../cases/order-tracker-late-fill.md)
 
 ## ⑤ 面试怎么说
 
-> 我早期有一个 Ghost Cancel 问题：本地发出 cancel intent 后直接把订单写成 CANCELED，相当于本地状态越权制造了交易所事实。后来我把它拆成 CANCEL_REQUESTED 和 CancelAck，并明确 source of truth：execution fact 高于 order fact，高于 local mirror，高于 intent。这个改动不是状态机美化，而是被真实 late-fill failure 逼出来的。
+> 我先修过一层 Ghost Cancel：cancel intent 不能直接写成 CANCELED，必须等 CancelAck。2026-10-06 我又用确定性事件流复现出第二层问题：CancelAck 已经成立后，一笔更晚到达本地的唯一成交会被旧 processFill 静默拒绝，filledQty 从应有的 0.007 停在 0.004。修复时我把 fillId 去重前置，并允许 CANCELED 在 originalQty 预算内继续接收唯一成交，但 status 保持 CANCELED，避免订单重新进入 open orders。这个修复让我确认：终态是本地生命周期判断，不等于否定更晚到达的成交事实；不变量放在哪个分支之前，本身就是设计。
 
 ## ⑥ 什么程度算学会
 
@@ -470,7 +472,7 @@ Historical Replay 用来检查方法问题，而不是把历史案例包装成 A
 如果准备时间有限，先做到：
 
 - 能画 Projected Position 数据流；
-- 能讲 Ghost Cancel 是怎么被发现和修正的；
+- 能讲 Ghost Cancel，以及 2026-10-06 终态迟到成交 bug 是怎么被复现、修正和验证的；
 - 能解释 submit timeout 为什么不能直接 retry；
 - 能区分 Reconciliation 与 Recovery；
 - 能解释 Binance SDK 和自有 Core 的边界；

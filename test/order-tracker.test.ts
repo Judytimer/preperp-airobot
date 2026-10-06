@@ -16,13 +16,26 @@ test("tracks client identity before ack, partial fills, and duplicate fill ids",
   assert.deepEqual(tracker.get("CLIENT-1"), order("SIM-1", "FILLED", 0.01, 0));
 });
 
-test("ACKED reaches CANCELED after a matching venue cancel acknowledgment", () => {
+test("accepts a unique late fill after cancel acknowledgment without reopening the order", () => {
   const tracker = submitted();
   tracker.processAck(ack());
-  assert.equal(tracker.requestCancelOpenOrders()[0]?.status, "CANCEL_REQUESTED");
+  tracker.processFill(fill("FILL-1", 0.004));
+  tracker.requestCancelOpenOrders();
   tracker.processCancelAck(cancelAck());
-  assert.equal(tracker.get("CLIENT-1")?.status, "CANCELED");
-  assert.equal(tracker.processFill(fill("LATE", 0.01)).accepted, false);
+
+  const result = tracker.processFill(fill("LATE", 0.003));
+  assert.equal(result.accepted, true);
+  assert.deepEqual(result.order, order("SIM-1", "CANCELED", 0.007, 0.003));
+  assert.equal(tracker.getOpenOrders().length, 0);
+  assert.equal(tracker.processFill(fill("LATE", 0.003)).accepted, false);
+});
+
+test("duplicate fill id is rejected before terminal-state quantity checks", () => {
+  const tracker = submitted();
+  tracker.processAck(ack());
+  tracker.processFill(fill("FILL-ALL", 0.01));
+  assert.equal(tracker.processFill(fill("FILL-ALL", 0.01)).accepted, false);
+  assert.throws(() => tracker.processFill(fill("FILL-NEW", 0.001)), /exceeds remaining quantity/);
 });
 
 test("SUBMITTED cancel acknowledgment binds venue identity before CANCELED", () => {

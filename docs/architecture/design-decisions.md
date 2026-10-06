@@ -1,5 +1,6 @@
 # 关键架构决策
 
+> 更新时间：2026-10-06  
 > 只记录经过当前源码、确定性 Failure Case 和后期 Repo Reality 审计仍然成立的稳定判断。
 
 ## 1. 当前代码事实优先于旧计划
@@ -54,6 +55,8 @@ Liquidation × Late Fill 实验暴露的核心 invariant：
 
 > 本地订单状态不能静默抹掉一个有效、唯一、来自交易所侧的成交事实。
 
+2026-10-06 的确定性复现证明了一个更具体的实现问题：旧 `processFill` 在 `CANCELED` 分支先返回，导致 unique late fill 被静默丢弃，且 fillId 去重不变量也会被终态分支短路。当前实现先做 fillId 幂等，再做身份与数量校验；`CANCELED` 在 `originalQty - filledQty` 预算内继续修正成交记账，但保持终态，因此不会重新进入 `getOpenOrders()`。
+
 ## 6. Command 完成不等于 ACK
 
 `submit()` 返回只表示命令调用完成。ACK / Fill / CancelAck 必须通过独立 execution event 推进状态。
@@ -107,7 +110,7 @@ Exchange Reconciliation
 
 ## 13. 到达时间不等于撮合时间
 
-真正的 S2 cancel/fill race 可能是先撮合、后取消生效、Fill 更晚才到本地。未来需要区分 `executionAt`、`cancelEffectiveAt`、`receivedAt`。
+2026-10-06 已用本地确定性事件序列复现并修复“CancelAck 后 unique Fill 晚到”的 OrderTracker correctness failure。但这不等于已经完整建模交易所时间语义：真实 S2 cancel/fill race 仍可能是先撮合、后取消生效、Fill 更晚才到本地；只有 authenticated venue evidence 证明需要时，才引入 `executionAt`、`cancelEffectiveAt`、`receivedAt`。
 
 ## 14. Schema Taste 不等于工程债
 

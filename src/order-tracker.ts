@@ -76,19 +76,30 @@ export class InFlightOrderTracker {
 
   processFill(fill: Fill): FillProcessResult {
     const tracked = this.require(fill.clientOrderId);
-    if (tracked.order.status === "CANCELED") return { accepted: false, order: { ...tracked.order } };
     if (tracked.processedFillIds.has(fill.fillId)) return { accepted: false, order: { ...tracked.order } };
     if (tracked.order.exchangeOrderId !== fill.exchangeOrderId || fill.symbol !== tracked.symbol ||
         fill.side !== tracked.order.side) {
       throw new Error(`fill ${fill.fillId} does not match order ${fill.clientOrderId}`);
     }
-    if (fill.qty <= 0 || fill.qty > tracked.order.remainingQty) {
+
+    const terminal = tracked.order.status === "CANCELED" || tracked.order.status === "FILLED";
+    const fillBudget = terminal
+      ? round(tracked.order.originalQty - tracked.order.filledQty)
+      : tracked.order.remainingQty;
+    if (fill.qty <= 0 || fill.qty > fillBudget) {
       throw new Error(`fill ${fill.fillId} exceeds remaining quantity`);
     }
+
     const filledQty = round(tracked.order.filledQty + fill.qty);
     const remainingQty = round(tracked.order.originalQty - filledQty);
-    tracked.order = { ...tracked.order, filledQty, remainingQty,
-      status: remainingQty === 0 ? "FILLED" : "PARTIALLY_FILLED" };
+    tracked.order = {
+      ...tracked.order,
+      filledQty,
+      remainingQty,
+      status: terminal
+        ? tracked.order.status
+        : remainingQty === 0 ? "FILLED" : "PARTIALLY_FILLED"
+    };
     tracked.processedFillIds.add(fill.fillId);
     return { accepted: true, order: { ...tracked.order } };
   }

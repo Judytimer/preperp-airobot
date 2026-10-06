@@ -1,5 +1,6 @@
 # 延期设计与触发式路线图
 
+> 更新时间：2026-10-06  
 > 这不是普通 TODO List。只有真实证据出现时，某个设计才重新进入实现队列。
 
 ## 状态模型
@@ -28,9 +29,13 @@ authoritative evidence
 
 只有 authenticated Testnet/venue evidence 暴露真实 recovery case、adapter 有足够权威证据、或 JD 明确要求时再打开。
 
-### A2. 真正的 S2 Late Fill
+### A2. S2 Late Fill：本地 correctness 已修，venue 时间语义仍延期
 
-S1 Ghost Cancel 已修正。S2 是“先 execution → 后 cancel effective → Fill 更晚到本地”，届时再引入 `executionAt / cancelEffectiveAt / receivedAt`。
+2026-10-06 已用确定性事件流复现并修复 `partial fill → CancelAck / CANCELED → unique late fill`：旧实现会 `accepted:false` 并少记成交；当前实现允许在 originalQty 预算内补记成交，同时保持 `CANCELED`，且 duplicate fillId 仍幂等。
+
+仍延期的是交易所级时间语义：只有 authenticated venue evidence 证明需要区分“先 execution、后 cancel effective、Fill 更晚 received”时，再引入 `executionAt / cancelEffectiveAt / receivedAt`。
+
+另一个独立失败仍保留：订单已 `FILLED` 后如果出现全新 fillId，当前仍会以 quantity overflow 抛错。它不与本次修复混在一起。
 
 ### A3. EventLog
 
