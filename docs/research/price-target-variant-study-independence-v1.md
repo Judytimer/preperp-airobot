@@ -150,3 +150,7 @@ SOL_stageA: NOT_STARTED
 ```
 
 `7 QUALIFIED contracts` 不得写成 `7 independent samples`。这个 BTC cluster 已占据第一个 locked slot，但在 4h evidence 完整前不得提前写成 `1/3 complete`。
+
+## 7. 首个 locked cluster outcome
+
+primary boundary 后的只读 evidence audit 确认没有归档任何 underlying Perp mark artifact，无法唯一重算 1h/4h return、MFE 或 MAE。BTC slot #1 已永久终结为 `DATA_BLOCKED`，不得补抓或由后续 cluster 替换。完整审计见 [BTC Trigger Cluster #1 Outcome](evidence/price-target-btc-cluster-001.md)。
