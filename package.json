@@ -13,7 +13,7 @@
     "validate:perp:testnet": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/perp-testnet-validation.ts",
     "smoke:closure": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/closure-smoke.ts",
     "testnet:market": "node --experimental-strip-types src/testnet-market-smoke.ts",
-    "testnet": "node --experimental-strip-types src/testnet-index.ts",
+    "testnet": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/testnet-index.ts",
     "acquire:formal-case-1": "bash scripts/acquire-formal-case-1.sh",
     "overlay": "node --experimental-strip-types src/overlay-index.ts",
     "prospective:discover": "node --experimental-strip-types src/overlay/prospective-discovery.ts",
