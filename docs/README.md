@@ -6,25 +6,28 @@
 
 如果只想快速了解项目，请先看根目录 [README](../README.md)。README 负责回答“现在做到了什么”；这里负责回答“为什么这么设计、哪些故障逼出了这些设计、哪些事情现在故意不做”。
 
-## 面试准备
+## 面试准备（2026-10-06 当前最高优先级）
 
-- [面试准备入口](interview/README.md) — 把项目材料串成 6 个核心工程判断，按“15 岁解释 → Failure → 设计判断 → 源码 → 面试表达 → 掌握标准”训练。
+- [面试冲刺入口](interview/README.md) — **先看这个。** 已按“一个真 Failure → 真实输出 → 修正判断 → 设计决策 → 抽象 → 90 秒表达 → 追问边界”重新整理，不要求先把整个仓库读完。
+- [OrderTracker 终态迟到成交](cases/order-tracker-late-fill.md) — 当前最完整的主技术故事：确定性复现、最小修复、回归边界和未解决 Failure。
 
 ## 推荐阅读顺序
 
-### 5 分钟快速了解
+### 面试前时间很少：只按这个顺序
 
-1. [关键架构决策](architecture/design-decisions.md)  
-   看最重要的工程判断：Intent 与 Fact、Command/Event 分离、Projected Position、Fail-Closed Recovery、Reconciliation。
+1. [面试冲刺入口](interview/README.md)  
+   先吃透 P0 主故事，再补 Projected Position、Ambiguous Submit、Recovery ≠ Reconciliation 三个支撑判断。
 
-2. [Binance Testnet 验证记录](cases/testnet-validation.md)  
-   看本地 Core 如何接到真实 Testnet market/user stream，以及当时已经验证和仍未验证的边界。
+2. [OrderTracker 终态迟到成交](cases/order-tracker-late-fill.md)  
+   对照 A/B/C/D 四个场景，把“哪些已修、哪些没修”说准确。
 
-3. [AI Shadow：为什么 AI 只做副驾驶](research/ai-shadow.md)  
-   看 AI 权限边界，以及为什么目前不允许模型直接控制下单与风控。
+3. [关键架构决策](architecture/design-decisions.md)  
+   只看 Intent vs Fact、权威成交事实、Projected Position、Recovery / Reconciliation。
 
-4. [延期设计与触发条件](roadmap/deferred-designs.md)  
-   看哪些能力不是“忘了做”，而是等真实 failure / exchange evidence 出现后才值得增加复杂度。
+4. [Perp Execution Validation](cases/perp-execution-validation.md)  
+   用来校准 Testnet 到底验证了什么、没验证什么。
+
+其余 Strategy Lab / AI Shadow / Prospective 文档只有在前四项能脱离文档讲清以后再展开。
 
 ## 深挖交易工程
 
