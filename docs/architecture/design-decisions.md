@@ -1,6 +1,6 @@
 # 关键架构决策
 
-> 更新时间：2026-10-06  
+> 更新时间：2026-10-07  
 > 只记录经过当前源码、确定性 Failure Case 和后期 Repo Reality 审计仍然成立的稳定判断。
 
 ## 1. 当前代码事实优先于旧计划
@@ -49,7 +49,7 @@ Local mirror
 Intent
 ```
 
-## 5. 本地状态不能抹掉权威成交事实
+## 5. 本地状态不能抹掉权威成交事实 `[IMPLEMENTED / TRACKER-LEVEL VERIFIED]`
 
 Liquidation × Late Fill 实验暴露的核心 invariant：
 
@@ -57,11 +57,13 @@ Liquidation × Late Fill 实验暴露的核心 invariant：
 
 2026-10-06 的确定性复现证明了一个更具体的实现问题：旧 `processFill` 在 `CANCELED` 分支先返回，导致 unique late fill 被静默丢弃，且 fillId 去重不变量也会被终态分支短路。当前实现先做 fillId 幂等，再做身份与数量校验；`CANCELED` 在 `originalQty - filledQty` 预算内继续修正成交记账，但保持终态，因此不会重新进入 `getOpenOrders()`。
 
-## 6. Command 完成不等于 ACK
+当前证据等级要区分：OrderTracker deterministic regression 已覆盖该行为；Bot 的通用 accepted-Fill 路径会继续写入 PositionBook，但还没有单独增加一条 late-fill Bot-level 专项 integration regression。
+
+## 6. Command 完成不等于 ACK `[IMPLEMENTED]`
 
 `submit()` 返回只表示命令调用完成。ACK / Fill / CancelAck 必须通过独立 execution event 推进状态。
 
-## 7. Ambiguous Submit 不能靠通用 Retry
+## 7. Ambiguous Submit 不能靠通用 Retry `[PARTIAL]`
 
 ```text
 submit
@@ -71,26 +73,30 @@ submit
 → 重复订单
 ```
 
-因此 signed order submit 不使用普通自动重试；必须依赖 clientOrderId、交易所证据和 reconciliation。
+当前已实现 signed order submit 关闭普通自动重试，并在越过 venue boundary 前持久化 clientOrderId。
 
-## 8. clientOrderId 由 Core 提前拥有
+但运行期 `submit timeout → authoritative evidence query → reconciliation / recovery → safe resume` 还没有完整自动化。因此“必须依赖交易所证据收敛”是设计边界，不应表述成 Core 已经自动完成的流程。
+
+## 8. clientOrderId 由 Core 提前拥有 `[IMPLEMENTED]`
 
 Core 在越过 venue boundary 前生成并持久化 `clientOrderId`，Exchange/venue 再绑定 `exchangeOrderId`。即使 ACK 丢失，本地仍知道自己刚刚提交的是哪张订单。
 
-## 9. Risk 必须看 Projected Position
+## 9. Risk 必须看 Projected Position `[IMPLEMENTED]`
 
 风控读取 filled Position + unresolved order remaining quantity，避免 Fill 延迟期间误判“还有仓位空间”并重复下单。
 
-## 10. Reconciliation 不等于 Recovery
+## 10. Reconciliation 不等于 Recovery `[RECONCILIATION IMPLEMENTED / RECOVERY DEFERRED]`
 
 Reconciliation：本地和交易所哪里不一致？  
 Recovery：拿到足够权威证据后，怎样安全收敛并重新允许交易？
 
-当前已有只读 reconciliation 和 Recovery Evidence contract；完整 recovery mutation 仍延期。
+当前已有只读 reconciliation 和 Recovery Evidence contract；`validateRecoveryEvidence` 只校验证据是否足够，不负责修改本地状态、决定如何收敛或解除 recovery gate。完整 recovery mutation / convergence 仍延期。
 
-## 11. 不确定时 Fail Closed
+## 11. 不确定时 Fail Closed `[RESTART IMPLEMENTED / RUNTIME PARTIAL]`
 
-重启或网络异常后，如果不能证明 unresolved order 的最终状态，进入 `RECOVERY_REQUIRED` 并停止新交易。
+当前已实现的是：**重启后**如果 checkpoint 里仍有 unresolved order，则进入 `RECOVERY_REQUIRED` 并停止新交易。
+
+运行期网络异常 / ambiguous submit 应遵循同样的 fail-closed 原则，但目前还没有统一实现成自动的 `recoveryRequired = true` 状态转换。
 
 ## 12. Checkpoint 不等于完整事件历史
 
