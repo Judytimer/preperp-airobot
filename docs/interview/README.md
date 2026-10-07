@@ -1,6 +1,6 @@
 # 面试冲刺入口：先吃透一个真故事，再补三个判断
 
-> 更新时间：2026-10-06  
+> 更新时间：2026-10-07  
 > 面试：2026-10-08  
 > 目标：不是把仓库全部背下来，而是能把 **Failure → 证据 → 设计决策 → 修复 → 抽象 → 边界** 讲顺。
 
@@ -60,6 +60,8 @@ getOpenOrders()=0
 ```
 
 先把这一段讲顺，再谈“终态”“不变量”“幂等”。
+
+证据层级要说准确：当前已有 **OrderTracker 层 deterministic regression**；Bot 的通用 execution path 也会把 accepted Fill 应用到 PositionBook，但还没有单独增加一条“CancelAck → late Fill → PositionBook 修正”的 Bot-level 专项 integration regression。
 
 ---
 
@@ -244,15 +246,24 @@ exchange 一定没收到
 
 如果直接 retry，可能重复下单。
 
-### 设计边界
+### 当前已实现
 
 ```text
 Core 先生成并持久化 clientOrderId
 → submit
-→ timeout 时不自动重试
-→ 查询 authoritative evidence
-→ reconcile
+→ authenticated createOrder 禁止盲目自动重试
 ```
+
+### 尚未完整自动化
+
+```text
+ambiguous submit timeout
+→ authoritative evidence query
+→ reconciliation / recovery
+→ safe resume
+```
+
+也就是说，“timeout 后查询权威证据并收敛”是当前认可的设计边界，但还不是 Core 已经自动完成的运行时流程。
 
 源码：
 
@@ -281,12 +292,12 @@ Recovery
 当前仓库已经有：
 
 - checkpoint；
-- unresolved detection；
-- `RECOVERY_REQUIRED`；
+- restart 时的 unresolved detection；
+- restart 场景下的 `RECOVERY_REQUIRED` gate；
 - read-only reconciliation；
 - Recovery Evidence contract。
 
-还没有完整自动 Recovery convergence。
+还没有完整自动 Recovery convergence；运行期 ambiguous network failure 也还没有统一接入同一套 recovery state transition。
 
 **不要说成“我故意设计成没有出口”。**
 
