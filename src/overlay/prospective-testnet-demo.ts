@@ -215,7 +215,20 @@ export async function runProspectiveTestnetDemo(
   }));
   for (;;) {
     const cycleStartedAt = Date.now();
-    const collector = await runPriceTargetCollectorCycle(outputDirectory);
+    let collector;
+    try {
+      collector = await runPriceTargetCollectorCycle(outputDirectory);
+    } catch (error) {
+      // Public evidence collection may resume after a transient read failure.
+      // Testnet order submission is deliberately outside this retry boundary.
+      console.error("[PREDICTION_TESTNET_DEMO_COLLECTION_RETRY]", JSON.stringify({
+        reason: error instanceof Error ? error.message : "unknown collection failure",
+        orderRetry: false
+      }));
+      const remaining = Math.max(0, pollIntervalMs - (Date.now() - cycleStartedAt));
+      await sleep(remaining);
+      continue;
+    }
     console.log("[PREDICTION_TESTNET_DEMO_COLLECTOR]", JSON.stringify({
       recordedAt: collector.recordedAt,
       admission: collector.admission
