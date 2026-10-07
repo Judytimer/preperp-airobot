@@ -10,7 +10,7 @@ import {
   runPriceTargetCollectorCycle,
   synchronizePriceTargetClock
 } from "./price-target-collector.ts";
-import type { PriceTargetEpisodeState, PriceTargetManifest } from "./price-target-admission.ts";
+import type { PriceTargetAsset, PriceTargetEpisodeState, PriceTargetManifest } from "./price-target-admission.ts";
 import { OverlayRiskManager } from "./risk.ts";
 import type { OverlaySignal, PredictionPosition } from "./types.ts";
 
@@ -21,6 +21,7 @@ export type ProspectivePaperCandidate = {
   readonly manifestId: string;
   readonly candidateId: string;
   readonly candidateT0: number;
+  readonly asset: PriceTargetAsset;
   readonly marketId: string;
   readonly entryBestAsk: number;
   readonly entryBestAskSize: number;
@@ -135,6 +136,7 @@ export async function findFirstNewCandidate(
       manifestId: state.manifestId,
       candidateId: state.candidate.candidateId,
       candidateT0: state.candidate.candidateT0,
+      asset: manifest.episode.asset,
       marketId: manifest.registration.selectedMarketId,
       entryBestAsk: state.candidate.entryBestAsk,
       entryBestAskSize: state.candidate.entryBestAskSize,

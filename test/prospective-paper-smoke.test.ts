@@ -43,6 +43,7 @@ function prospectiveCandidate(candidateId: string, candidateT0: number): Prospec
     manifestId: `MANIFEST-${candidateId}`,
     candidateId,
     candidateT0,
+    asset: "BTC",
     marketId: "POLYMARKET-YES-1",
     entryBestAsk: 0.4,
     entryBestAskSize: 100,
