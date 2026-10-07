@@ -1,6 +1,6 @@
 # 文档阅读地图
 
-> 更新时间：2026-10-06
+> 更新时间：2026-10-07
 
 这个目录不是开发日志的平铺列表，而是项目的**工程判断与证据层**。
 
@@ -73,8 +73,9 @@
 ## 路线图
 
 - [延期设计与触发条件](roadmap/deferred-designs.md)
+- [Durable Research Runtime：面向 Strategy Lab 的长期研究与恢复层](roadmap/durable-research-runtime.md) — **Future Research / NO IMPLEMENTATION AUTHORIZATION。** 借鉴长期 Agent 的 durable task、background watch、checkpoint、wake、dedup / reconciliation 思想，服务 Prospective Discovery → Admission → T0 Freeze → Evidence → Outcome；不修改已冻结的 Strategy / Risk / Execution / Position。
 
-它不是功能愿望清单，而是回答：什么证据出现以后，才值得重新打开 Recovery Completion、S2 的 venue 时间语义、EventLog、更多 Perp 风险真实度或 AI gating。
+它们不是功能愿望清单，而是回答：什么证据出现以后，才值得重新打开 Recovery Completion、S2 的 venue 时间语义、EventLog、更多 Perp 风险真实度、AI gating，或 Strategy Lab 的长期研究运行时。
 
 ## 历史归档
 
