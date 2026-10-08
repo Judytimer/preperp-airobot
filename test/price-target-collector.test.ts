@@ -45,6 +45,26 @@ test("parses measurementAt from slug plus frozen ET rules and preserves the full
   assert.deepEqual(result.episodes[0]?.markets.map((market) => market.strike), [100, 110]);
 });
 
+test("discovers XRP price-target episodes under the v1.1 asset extension", () => {
+  const rules = "This market resolves Yes if the Binance 1 minute candle for XRP/USDT 12:00 in the ET timezone has a final \"Close\" price higher than the price specified in the title.";
+  const raw = search([{
+    ...event("300", "xrp-above-on-october-6-2026"),
+    title: "XRP above ___ on October 6?",
+    slug: "xrp-above-on-october-6-2026",
+    description: rules,
+    markets: [
+      { ...market("31", 2.5, "YES-XRP-25", rules), question: "Will the price of XRP be above $2.5 on October 6?" },
+      { ...market("32", 3, "YES-XRP-30", rules), question: "Will the price of XRP be above $3 on October 6?" }
+    ]
+  }]);
+  const result = parsePriceTargetSearch("XRP", raw, NOW, artifact());
+
+  assert.equal(result.blocked.length, 0);
+  assert.equal(result.episodes.length, 1);
+  assert.equal(result.episodes[0]?.asset, "XRP");
+  assert.equal(result.episodes[0]?.episodeKey, `XRP-BINANCE_SPOT-XRPUSDT-${Date.parse("2026-10-06T16:00:00Z")}`);
+});
+
 test("refuses to activate a new cohort from late historical mark candles", async () => {
   const directory = await mkdtemp(join(tmpdir(), "price-target-v1-stale-mark-"));
   await assert.rejects(

@@ -55,6 +55,8 @@
 - [Directional Study v1.1：分级授权预注册协议](research/directional-study-v1.md) — 3 个样本只解锁 Testnet review，10 个样本才解锁 Micro-Capital review；两级都不自动交易。
 - [Concrete Variant 2：Crypto Price-Target Feasibility](research/price-target-variant-feasibility.md) — 真实核查 BTC/ETH/SOL fixed-time price contracts 的样本供给与独立性风险；feasibility 已完成，admission v1 已冻结，不写执行代码。
 - [Concrete Variant 2：Price-Target Admission Protocol v1.0.0](research/price-target-variant-admission-v1.md) — 冻结 episode 去重、nearest-OTM strike、首次 1m upward crossing、Candidate T0 与 fail-closed evidence admission；collector 已实现，但没有执行权限。
+- [Concrete Variant 2：Price-Target Admission v1.1 Asset Extension](research/price-target-variant-admission-v1.1.md) — 根据真实市场供给把 XRP 作为独立 cohort 加入采集与 Testnet demo 范围；旧三资产 Directional Study 不变，禁止把 XRP 倒灌进旧 cohort。
+- [高流动性资产 × Prediction Market 供给审计（2026-10-08）](research/high-liquidity-prediction-supply-2026-10-08.md) — 实时交叉 Binance USDT 永续流动性与 Polymarket active crypto events；确认小时级 Up/Down 市场覆盖 7 个可执行资产，不再把日度 Price-Target 的 4 资产误当成全部研究空间。
 - [Price-Target Variant v1：Prospective Admission Collector](research/price-target-collector-v1.md) — 最小 manifest/schema/collector 实现；持续归档 pre-T0 YES book 与 Spot 1m，只推进 research admission state，不连接 Strategy 或 Execution。
 - [Price-Target Variant 2：Study Independence Rule v1.0.1](research/price-target-variant-study-independence-v1.md) — 冻结 `asset + candidateT0` trigger cluster；先按 T0 锁定最早 3/10 个 qualified clusters，blocked 永久占位且不得由后样本替换。
 - [Price-Target Variant 2：BTC Trigger Cluster #1 Outcome](research/evidence/price-target-btc-cluster-001.md) — 首个 locked BTC cluster 因缺少预先归档的 Perp mark path 永久 `DATA_BLOCKED`；32 个已有 raw artifact checksums 全部通过，禁止历史补抓修复。

@@ -5,3 +5,9 @@ work/
 .runtime/
 .env
 .firecrawl/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/*.tsbuildinfo
+desktop/vite.config.js
+desktop/vite.config.d.ts

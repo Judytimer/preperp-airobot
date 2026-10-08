@@ -3,6 +3,8 @@ import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { runtimeEvidencePath } from "../runtime-paths.ts";
+
 export const POLYMARKET_LEGACY_DISCOVERY_SOURCE_URL =
   "https://gamma-api.polymarket.com/markets?closed=false&limit=100&order=createdAt&ascending=false";
 export const POLYMARKET_DISCOVERY_SOURCE_URL =
@@ -402,7 +404,7 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 async function main(): Promise<void> {
-  const outputDirectory = process.argv[2] ?? "work/prospective-v2.1/discovery";
+  const outputDirectory = process.argv[2] ?? runtimeEvidencePath("prospective-v2.1", "discovery");
   const result = await runPolymarketDiscoveryScan(outputDirectory);
   console.log(JSON.stringify({
     status: "SCAN_RECORDED",

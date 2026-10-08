@@ -12,6 +12,7 @@ import { ObservedExecutionVenue } from "./closure-smoke.ts";
 import { validateFlatPreflight } from "./perp-testnet-validation.ts";
 import { MovingAverageSignal, type PerpSignalSource } from "./strategy.ts";
 import { JsonFileBotStateStore } from "./state-store.ts";
+import { runtimeStatePath } from "./runtime-paths.ts";
 import type { Position, Signal, Tick } from "./types.ts";
 
 const CANONICAL_SYMBOL = "BTC-PERP";
@@ -79,7 +80,7 @@ async function main(): Promise<void> {
     orderQty: ORDER_QTY,
     maxAbsPosition: ORDER_QTY,
     margin: { collateral: 1_000, leverage: 5, maintenanceMarginRate: 0.005 },
-    stateStore: new JsonFileBotStateStore(".runtime/ma-testnet-validation-state.json"),
+    stateStore: new JsonFileBotStateStore(runtimeStatePath("ma-testnet-validation-state.json")),
     venue: observedVenue,
     logger: console.log
   });

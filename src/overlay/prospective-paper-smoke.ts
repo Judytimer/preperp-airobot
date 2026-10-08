@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { SimulatedExchange } from "../exchange.ts";
+import { runtimeEvidencePath } from "../runtime-paths.ts";
 import type { ExecutionEvent } from "../types.ts";
 import { PredictionPositionBook } from "./position.ts";
 import {
@@ -14,7 +15,7 @@ import type { PriceTargetAsset, PriceTargetEpisodeState, PriceTargetManifest } f
 import { OverlayRiskManager } from "./risk.ts";
 import type { OverlaySignal, PredictionPosition } from "./types.ts";
 
-const DEFAULT_OUTPUT_DIRECTORY = "work/price-target-v1";
+const DEFAULT_OUTPUT_DIRECTORY = runtimeEvidencePath("price-target-v1");
 const DEFAULT_MAX_RISK_BUDGET = 10;
 
 export type ProspectivePaperCandidate = {
@@ -111,17 +112,20 @@ export async function executeProspectivePaperRoundTrip(
 
 export function selectFirstNewCandidate(
   candidates: readonly ProspectivePaperCandidate[],
-  armedAt: number
+  armedAt: number,
+  allowedAssets: readonly PriceTargetAsset[] = ["BTC", "ETH", "SOL", "XRP"]
 ): ProspectivePaperCandidate | null {
   if (!Number.isSafeInteger(armedAt) || armedAt < 0) throw new Error("armedAt is invalid");
+  const allowed = new Set(allowedAssets);
   return [...candidates]
-    .filter((candidate) => candidate.candidateT0 > armedAt)
+    .filter((candidate) => candidate.candidateT0 > armedAt && allowed.has(candidate.asset))
     .sort((left, right) => left.candidateT0 - right.candidateT0 || left.candidateId.localeCompare(right.candidateId))[0] ?? null;
 }
 
 export async function findFirstNewCandidate(
   outputDirectory: string,
-  armedAt: number
+  armedAt: number,
+  allowedAssets?: readonly PriceTargetAsset[]
 ): Promise<ProspectivePaperCandidate | null> {
   const root = resolve(outputDirectory);
   const stateNames = await listJson(resolve(root, "states"));
@@ -143,7 +147,7 @@ export async function findFirstNewCandidate(
       yesBookObservedAt: state.candidate.yesBookObservedAt
     });
   }
-  return selectFirstNewCandidate(candidates, armedAt);
+  return selectFirstNewCandidate(candidates, armedAt, allowedAssets);
 }
 
 export async function runProspectivePaperSmoke(

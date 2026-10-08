@@ -1,8 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+
+import { resolveRepositoryCommit } from "../build-identity.ts";
+import { domainEvent, JsonlDomainEventSink } from "../observability/domain-event.ts";
+import { runtimeEvidencePath, runtimeLogPath } from "../runtime-paths.ts";
 
 import {
   evaluatePriceTargetEpisode,
@@ -25,15 +28,18 @@ import {
   archivePriceTargetPerpMarks,
   type PerpMarkArchiveSummary
 } from "./price-target-perp-mark-archive.ts";
+import { runHourlyUpDownCollectorCycle } from "./hourly-up-down-collector.ts";
+import { runLayaCandidateReviewCycle } from "./laya-candidate-review.ts";
 
 export const PRICE_TARGET_POLL_INTERVAL_MS = 60_000;
 export const PRICE_TARGET_SEARCH_LIMIT = 50;
-export const PRICE_TARGET_ASSETS = ["BTC", "ETH", "SOL"] as const;
+export const PRICE_TARGET_ASSETS = ["BTC", "ETH", "SOL", "XRP"] as const;
 
 const ASSET_CONFIG = {
   BTC: { query: "Bitcoin", label: "Bitcoin", symbol: "BTCUSDT", cohort: "PRICE_TARGET_V1_BTC" },
   ETH: { query: "Ethereum", label: "Ethereum", symbol: "ETHUSDT", cohort: "PRICE_TARGET_V1_ETH" },
-  SOL: { query: "Solana", label: "Solana", symbol: "SOLUSDT", cohort: "PRICE_TARGET_V1_SOL" }
+  SOL: { query: "Solana", label: "Solana", symbol: "SOLUSDT", cohort: "PRICE_TARGET_V1_SOL" },
+  XRP: { query: "XRP", label: "XRP", symbol: "XRPUSDT", cohort: "PRICE_TARGET_V1_XRP" }
 } as const;
 
 type DiscoveredMarket = {
@@ -111,7 +117,7 @@ export async function runPriceTargetCollectorCycle(
     ? await synchronizePriceTargetClock(fetcher, timeoutMs)
     : injectedClock(dependencies.now);
   const now = clock.now;
-  const repositoryCommit = dependencies.repositoryCommit ?? currentCommit();
+  const repositoryCommit = dependencies.repositoryCommit ?? resolveRepositoryCommit();
   if (!/^[0-9a-f]{40}$/.test(repositoryCommit)) throw new Error("repository commit is invalid");
   const root = resolve(outputDirectory);
   await mkdir(root, { recursive: true });
@@ -705,7 +711,7 @@ function easternNoonUtc(year: number, month: number, day: number): number {
 }
 
 function validateRules(rules: string, asset: PriceTargetAsset): void {
-  const pair = asset === "BTC" ? "BTC/USDT" : asset === "ETH" ? "ETH/USDT" : "SOL/USDT";
+  const pair = `${asset}/USDT`;
   const required = [
     /Binance 1 minute candle/i,
     /12:00 in the ET timezone/i,
@@ -825,10 +831,6 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function currentCommit(): string {
-  return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-}
-
 function safeError(error: unknown): string {
   return error instanceof Error ? error.message : "unknown collector failure";
 }
@@ -853,11 +855,52 @@ const MONTHS = [
 async function main(): Promise<void> {
   const args = new Set(process.argv.slice(2));
   const watch = args.has("--watch");
-  const outputDirectory = process.argv.slice(2).find((argument) => !argument.startsWith("--")) ?? "work/price-target-v1";
+  const outputDirectory = process.argv.slice(2).find((argument) => !argument.startsWith("--")) ?? runtimeEvidencePath("price-target-v1");
+  const eventSink = new JsonlDomainEventSink(runtimeLogPath("domain-events.jsonl"));
   do {
     const cycleStartedAt = Date.now();
-    const summary = await runPriceTargetCollectorCycle(outputDirectory);
-    console.log(JSON.stringify(summary, null, 2));
+    const correlationId = `price-target-cycle-${cycleStartedAt}`;
+    await eventSink.publish(domainEvent({
+      type: "WATCH_CYCLE_STARTED",
+      occurredAt: cycleStartedAt,
+      correlationId,
+      payload: { outputDirectory, watch }
+    }));
+    try {
+      const summary = await runPriceTargetCollectorCycle(outputDirectory);
+      console.log(JSON.stringify(summary, null, 2));
+      const hourlySummary = await runHourlyUpDownCollectorCycle(runtimeEvidencePath("up-down-v1"));
+      console.log(JSON.stringify(hourlySummary, null, 2));
+      await eventSink.publish(domainEvent({
+        type: "WATCH_CYCLE_COMPLETED",
+        occurredAt: summary.recordedAt,
+        correlationId,
+        payload: {
+          discoveredEpisodes: summary.discoveredEpisodes,
+          registeredEpisodes: summary.registeredEpisodes,
+          blockedDiscoveries: summary.blockedDiscoveries,
+          waiting: summary.admission.waiting,
+          qualified: summary.admission.qualified,
+          dataBlocked: summary.admission.dataBlocked,
+          notTriggered: summary.admission.notTriggered,
+          hourlyDiscoveredEpisodes: hourlySummary.discoveredEpisodes,
+          hourlyActiveEpisodes: hourlySummary.activeEpisodes,
+          hourlyWaiting: hourlySummary.admission.waiting,
+          hourlyQualified: hourlySummary.admission.qualified,
+          scanPath: summary.scanPath
+        }
+      }));
+      const layaReview = await runLayaCandidateReviewCycle(outputDirectory, { eventSink });
+      console.log(JSON.stringify(layaReview, null, 2));
+    } catch (error) {
+      await eventSink.publish(domainEvent({
+        type: "WATCH_CYCLE_FAILED",
+        correlationId,
+        payload: { reason: safeError(error) }
+      }));
+      if (!watch) throw error;
+      console.error(`[price-target-watch] cycle failed; retrying on cadence: ${safeError(error)}`);
+    }
     if (!watch) break;
     const remaining = Math.max(0, PRICE_TARGET_POLL_INTERVAL_MS - (Date.now() - cycleStartedAt));
     await new Promise((resolvePromise) => setTimeout(resolvePromise, remaining));

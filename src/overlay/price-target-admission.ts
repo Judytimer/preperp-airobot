@@ -3,13 +3,22 @@ import { pathToFileURL } from "node:url";
 
 export const PRICE_TARGET_MANIFEST_SCHEMA_VERSION = "1.0.0" as const;
 export const PRICE_TARGET_STATE_SCHEMA_VERSION = "1.0.0" as const;
-export const PRICE_TARGET_PROTOCOL_VERSION = "PRICE_TARGET_ADMISSION_V1_0_0" as const;
+export const PRICE_TARGET_PROTOCOL_VERSION = "PRICE_TARGET_ADMISSION_V1_1_0" as const;
+export const PRICE_TARGET_LEGACY_PROTOCOL_VERSION = "PRICE_TARGET_ADMISSION_V1_0_0" as const;
 export const PRICE_TARGET_PRIMARY_HORIZON_MS = 4 * 60 * 60_000;
 export const PRICE_TARGET_BOOK_MAX_STALENESS_MS = 120_000;
 export const PRICE_TARGET_CANDLE_INTERVAL_MS = 60_000;
 
-export type PriceTargetAsset = "BTC" | "ETH" | "SOL";
-export type PriceTargetCohort = "PRICE_TARGET_V1_BTC" | "PRICE_TARGET_V1_ETH" | "PRICE_TARGET_V1_SOL";
+export type PriceTargetAsset = "BTC" | "ETH" | "SOL" | "XRP";
+export type PriceTargetCohort =
+  | "PRICE_TARGET_V1_BTC"
+  | "PRICE_TARGET_V1_ETH"
+  | "PRICE_TARGET_V1_SOL"
+  | "PRICE_TARGET_V1_XRP";
+export type PriceTargetResolutionSymbol = "BTCUSDT" | "ETHUSDT" | "SOLUSDT" | "XRPUSDT";
+export type PriceTargetProtocolVersion =
+  | typeof PRICE_TARGET_PROTOCOL_VERSION
+  | typeof PRICE_TARGET_LEGACY_PROTOCOL_VERSION;
 export type PriceTargetAdmissionStatus =
   | "REGISTERED_WAITING_TRIGGER"
   | "QUALIFIED"
@@ -57,7 +66,7 @@ export type PriceTargetMarketStatusSnapshot = {
 
 export type PriceTargetManifest = {
   readonly schemaVersion: typeof PRICE_TARGET_MANIFEST_SCHEMA_VERSION;
-  readonly protocolVersion: typeof PRICE_TARGET_PROTOCOL_VERSION;
+  readonly protocolVersion: PriceTargetProtocolVersion;
   readonly manifestId: string;
   readonly repositoryCommit: string;
   readonly cohortKey: PriceTargetCohort;
@@ -67,7 +76,7 @@ export type PriceTargetManifest = {
     readonly episodeKey: string;
     readonly asset: PriceTargetAsset;
     readonly resolutionVenue: "BINANCE_SPOT";
-    readonly resolutionSymbol: "BTCUSDT" | "ETHUSDT" | "SOLUSDT";
+    readonly resolutionSymbol: PriceTargetResolutionSymbol;
     readonly measurementAt: number;
     readonly cutoffT0: number;
   };
@@ -137,7 +146,10 @@ export function evaluatePriceTargetManifest(value: unknown): PriceTargetManifest
     dataReasons.push(`credential fields are forbidden: ${credentialFields.join(", ")}`);
   }
   if (value.schemaVersion !== PRICE_TARGET_MANIFEST_SCHEMA_VERSION) dataReasons.push("unsupported schemaVersion");
-  if (value.protocolVersion !== PRICE_TARGET_PROTOCOL_VERSION) eligibilityReasons.push("protocolVersion differs from frozen v1");
+  if (
+    value.protocolVersion !== PRICE_TARGET_PROTOCOL_VERSION &&
+    value.protocolVersion !== PRICE_TARGET_LEGACY_PROTOCOL_VERSION
+  ) eligibilityReasons.push("protocolVersion is not a supported frozen Price-Target protocol");
   if (!manifestId || !/^[A-Za-z0-9._-]+$/.test(manifestId)) dataReasons.push("manifestId is invalid");
   if (!nonEmptyString(value.repositoryCommit) || !/^[0-9a-f]{40}$/.test(value.repositoryCommit)) {
     dataReasons.push("repositoryCommit must be a 40-character lowercase commit SHA");
@@ -150,7 +162,7 @@ export function evaluatePriceTargetManifest(value: unknown): PriceTargetManifest
   if (!isRecord(value.episode)) {
     dataReasons.push("episode is missing");
   } else {
-    validateEpisode(value.episode, value.cohortKey, dataReasons, eligibilityReasons);
+    validateEpisode(value.episode, value.cohortKey, value.protocolVersion, dataReasons, eligibilityReasons);
   }
   if (!isRecord(value.ownerEvent)) {
     dataReasons.push("ownerEvent is missing");
@@ -287,6 +299,7 @@ export function newPriceTargetState(manifestId: string, registeredAt: number): P
 function validateEpisode(
   episode: Record<string, unknown>,
   cohort: unknown,
+  protocolVersion: unknown,
   dataReasons: string[],
   eligibilityReasons: string[]
 ): void {
@@ -297,8 +310,13 @@ function validateEpisode(
       ? { symbol: "ETHUSDT", cohort: "PRICE_TARGET_V1_ETH" }
       : asset === "SOL"
         ? { symbol: "SOLUSDT", cohort: "PRICE_TARGET_V1_SOL" }
-        : null;
-  if (expected === null) eligibilityReasons.push("asset is outside BTC/ETH/SOL");
+        : asset === "XRP"
+          ? { symbol: "XRPUSDT", cohort: "PRICE_TARGET_V1_XRP" }
+          : null;
+  if (expected === null) eligibilityReasons.push("asset is outside the registered Price-Target asset universe");
+  if (asset === "XRP" && protocolVersion === PRICE_TARGET_LEGACY_PROTOCOL_VERSION) {
+    eligibilityReasons.push("XRP requires Price-Target Admission v1.1 or later");
+  }
   if (episode.resolutionVenue !== "BINANCE_SPOT") eligibilityReasons.push("resolutionVenue must be BINANCE_SPOT");
   if (expected !== null && episode.resolutionSymbol !== expected.symbol) eligibilityReasons.push("resolutionSymbol does not match asset");
   if (expected !== null && cohort !== expected.cohort) eligibilityReasons.push("cohortKey does not match asset");

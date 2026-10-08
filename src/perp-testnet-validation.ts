@@ -12,6 +12,7 @@ import type { ExecutionEventHandler, ExecutionVenue } from "./exchange.ts";
 import { ExecutionValidationSignal, PERP_EXECUTION_VALIDATION_PROTOCOL_VERSION } from "./perp-execution-validation.ts";
 import type { ExchangeStateSnapshot, ReconciliationReport } from "./reconciliation.ts";
 import { JsonFileBotStateStore } from "./state-store.ts";
+import { runtimeStatePath } from "./runtime-paths.ts";
 import type { BotStateStore } from "./state-store.ts";
 import type { ExecutionEvent, Logger, Position, SubmitOrderCommand, Tick } from "./types.ts";
 
@@ -365,7 +366,7 @@ async function main(): Promise<void> {
     const report = await runAuthenticatedTestnetPerpValidation({
       venue,
       feed,
-      stateStore: new JsonFileBotStateStore(".runtime/perp-execution-validation-testnet-state.json"),
+      stateStore: new JsonFileBotStateStore(runtimeStatePath("perp-execution-validation-testnet-state.json")),
       logger: console.log
     });
     console.log("[PERP_TESTNET_VALIDATION]", JSON.stringify(report));

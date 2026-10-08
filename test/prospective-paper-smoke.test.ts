@@ -38,6 +38,13 @@ test("the smoke boundary ignores all Candidates at or before arming", () => {
   assert.equal(selectFirstNewCandidate([prospectiveCandidate("OLD", 1_000)], 1_500), null);
 });
 
+test("the consumer can restrict arming to assets with a ready Testnet preflight", () => {
+  const eth = { ...prospectiveCandidate("ETH", 2_000), asset: "ETH" as const };
+  const btc = prospectiveCandidate("BTC", 3_000);
+
+  assert.equal(selectFirstNewCandidate([eth, btc], 1_000, ["BTC"])?.candidateId, "BTC");
+});
+
 function prospectiveCandidate(candidateId: string, candidateT0: number): ProspectivePaperCandidate {
   return {
     manifestId: `MANIFEST-${candidateId}`,

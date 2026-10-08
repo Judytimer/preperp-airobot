@@ -1,5 +1,7 @@
 # Perp AI Trading Bot
 
+本地只读运行控制台：[desktop/README.md](desktop/README.md)。它会监督 prospective watcher，并把 `QUALIFIED Candidate → 本地 Laya Shadow Review → 不可变 evidence → 前端状态` 串成闭环，但不暴露任何交易权限。
+
 > TypeScript + Node.js 的永续合约交易执行工程项目。重点不是展示复杂策略，而是验证 **订单事实、仓位一致性、故障恢复和 AI 权限边界** 能否真正落到一个可运行系统里。
 
 ## 这个项目解决什么问题
@@ -67,6 +69,20 @@ real market ticks
 ```
 
 这里验证的是 **Strategy → Execution 的工程链路**，不是策略 alpha。
+
+Prediction 小时信号也已完成一次真实自动 Testnet smoke：
+
+```text
+Polymarket BTC Up/Down
+→ prospective DOWN Candidate（YES ask 0.44）
+→ TESTNET_DEMO_ONLY SHORT BTCUSDT 0.001
+→ ACK / Fill
+→ deterministic reduce-only FLAT
+→ authoritative position = FLAT / open orders = 0
+→ reconciliation PASS
+```
+
+这笔测试只证明 Prediction Candidate 能自动驱动测试网闭环；它不把一次 DOWN 信号解释为已验证 alpha。
 
 ### 3. AI Shadow
 
@@ -223,6 +239,28 @@ MA Strategy 驱动 Testnet：
 
 ```bash
 npm run testnet
+```
+
+Prediction 监控现在分成两条互不混淆的 lane：
+
+- 日度 Price-Target：`BTC / ETH / SOL / XRP`
+- 小时 Up/Down：`BTC / ETH / SOL / XRP / DOGE / HYPE / BNB`
+
+小时 lane 按 Polymarket 合约写明的 Binance 1h candle 语义归档 UP/DOWN order book 和 Binance 1m 路径；只有价格穿越小时开盘价、对应方向 YES ask 不高于 50c，且存在新鲜的 pre-T0 book，才生成 Candidate。`UP → LONG`、`DOWN → SHORT` 只作为 `TESTNET_DEMO_ONLY` 的执行冒烟映射，不声明方向 alpha。
+
+资产不是因为历史上出现过 Candidate 就永久写死；只有同时满足 Polymarket 存在相同语义的活跃合约、Binance 可提供决议行情、Binance Futures Testnet 可执行对应 USDT 永续时，才进入当前可执行池。
+
+```bash
+npm run price-target:watch
+npm run smoke:prediction:testnet
+```
+
+`price-target:watch` 是当前唯一 watcher 进程入口，会同时运行日度 Price-Target 和小时 Up/Down 采集；Testnet consumer 只读取不可变 Candidate evidence，不启动第二个 collector。
+
+桌面控制台会把预测市场、确定性 Candidate、Laya 旁路审核和 Binance Testnet 状态放在同一条中文可视化链路中：
+
+```bash
+npm run desktop:dev
 ```
 
 ---

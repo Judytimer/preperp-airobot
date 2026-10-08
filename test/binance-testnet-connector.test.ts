@@ -75,19 +75,65 @@ test("uses the external user stream as the only ACK and Fill fact path", async (
   assert.deepEqual(events.map((event) => event.type), ["ORDER_ACK", "FILL"]);
 });
 
+test("emergency cleanup uses one authoritative reduce-only order and reconciles FLAT", async () => {
+  const transport = new FakeTransport("LONG");
+  const venue = new BinanceUsdsTestnetVenue({
+    canonicalSymbol: "BTC-PERP",
+    venueSymbol: "BTCUSDT",
+    transport
+  });
+  venue.onExecutionEvent(() => undefined);
+  await venue.start();
+
+  const final = await venue.emergencyFlatten(1_000);
+  await venue.close();
+
+  assert.equal(final.position.side, "FLAT");
+  assert.deepEqual(transport.submissions.map(({ side, quantity, reduceOnly }) => ({ side, quantity, reduceOnly })), [
+    { side: "SELL", quantity: 0.01, reduceOnly: true }
+  ]);
+});
+
 class FakeTransport implements BinanceTestnetTransport {
   private handler: ((update: BinanceOrderTradeUpdate) => void | Promise<void>) | null = null;
+  private positionSide: "FLAT" | "LONG";
+  readonly submissions: Array<{
+    symbol: string;
+    side: "BUY" | "SELL";
+    quantity: number;
+    clientOrderId: string;
+    reduceOnly?: boolean;
+  }> = [];
+
+  constructor(positionSide: "FLAT" | "LONG" = "FLAT") {
+    this.positionSide = positionSide;
+  }
 
   async loadSymbolRules(): Promise<BinanceSymbolRules> { return symbolRules(); }
   async validateAccountMode(): Promise<void> {}
   async connectUserData(handler: (update: BinanceOrderTradeUpdate) => void | Promise<void>): Promise<void> {
     this.handler = handler;
   }
-  async submitMarketOrder(): Promise<void> {}
+  async submitMarketOrder(command: {
+    symbol: string;
+    side: "BUY" | "SELL";
+    quantity: number;
+    clientOrderId: string;
+    reduceOnly?: boolean;
+  }): Promise<void> {
+    this.submissions.push(command);
+    if (command.reduceOnly) this.positionSide = "FLAT";
+  }
   async cancelOrder(): Promise<void> {}
   async loadSnapshot() {
     return {
-      position: { symbol: "BTC-PERP", side: "FLAT" as const, qty: 0, entryPrice: 0, realizedPnl: 0 },
+      position: {
+        symbol: "BTC-PERP",
+        side: this.positionSide,
+        qty: this.positionSide === "LONG" ? 0.01 : 0,
+        entryPrice: this.positionSide === "LONG" ? 1_000 : 0,
+        realizedPnl: 0
+      },
       openOrders: []
     };
   }

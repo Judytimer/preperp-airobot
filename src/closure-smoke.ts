@@ -11,6 +11,7 @@ import { PerpBot } from "./bot.ts";
 import type { ExecutionEventHandler, ExecutionVenue } from "./exchange.ts";
 import type { ExchangeStateSnapshot, ReconciliationReport } from "./reconciliation.ts";
 import { JsonFileBotStateStore } from "./state-store.ts";
+import { runtimeStatePath } from "./runtime-paths.ts";
 import type { ExecutionEvent, Position, SubmitOrderCommand } from "./types.ts";
 import { LayaReviewerAdapter } from "./overlay/laya-reviewer.ts";
 import {
@@ -310,7 +311,7 @@ export async function runLiveBinanceClosure(
     orderQty: 0.001,
     maxAbsPosition: 0.003,
     margin: { collateral: 1_000, leverage: 5, maintenanceMarginRate: 0.005 },
-    stateStore: new JsonFileBotStateStore(".runtime/binance-testnet-state.json"),
+    stateStore: new JsonFileBotStateStore(runtimeStatePath("binance-testnet-state.json")),
     venue: observedVenue
   });
   const feed = new BinanceUsdsTestnetMarketFeed({

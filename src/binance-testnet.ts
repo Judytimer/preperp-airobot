@@ -52,6 +52,7 @@ export interface BinanceTestnetTransport {
     side: "BUY" | "SELL";
     quantity: number;
     clientOrderId: string;
+    reduceOnly?: boolean;
   }): Promise<void>;
   cancelOrder(command: { symbol: string; clientOrderId: string }): Promise<void>;
   loadSnapshot(symbol: string, canonicalSymbol: string): Promise<ExchangeStateSnapshot>;
@@ -64,6 +65,7 @@ export class OfficialBinanceUsdsTestnetTransport implements BinanceTestnetTransp
   private connection: any = null;
   private stream: any = null;
   private keepaliveTimer: NodeJS.Timeout | null = null;
+  private userDataStreamOpen = false;
 
   constructor(apiKey: string, apiSecret: string, onError: ErrorHandler = console.error) {
     if (apiKey.length === 0 || apiSecret.length === 0) {
@@ -106,6 +108,33 @@ export class OfficialBinanceUsdsTestnetTransport implements BinanceTestnetTransp
     }
   }
 
+  async ensureIsolatedMarginWhenFlat(symbol: string): Promise<void> {
+    const [positionModeResponse, symbolConfigResponse] = await Promise.all([
+      this.client.restAPI.getCurrentPositionMode(),
+      this.client.restAPI.symbolConfiguration({ symbol })
+    ]);
+    const positionMode = await positionModeResponse.data();
+    if (positionMode.dualSidePosition !== false) {
+      throw new Error("Binance Testnet account must use One-way Mode");
+    }
+    const symbolConfig = (await symbolConfigResponse.data()).find((item) => item.symbol === symbol);
+    if (String(symbolConfig?.marginType).toUpperCase() === "ISOLATED") return;
+
+    const [positionsResponse, ordersResponse] = await Promise.all([
+      this.client.restAPI.positionInformationV3({ symbol }),
+      this.client.restAPI.currentAllOpenOrders({ symbol })
+    ]);
+    const positions = await positionsResponse.data();
+    const orders = await ordersResponse.data();
+    const hasPosition = positions.some((position) => position.symbol === symbol && Number(position.positionAmt) !== 0);
+    const hasOpenOrders = orders.some((order) => order.symbol === symbol);
+    if (hasPosition || hasOpenOrders) {
+      throw new Error(`Binance Testnet ${symbol} cannot switch to isolated margin with exposure or open orders`);
+    }
+    await this.client.restAPI.changeMarginType({ symbol, marginType: "ISOLATED" as never });
+    await this.validateAccountMode(symbol);
+  }
+
   async connectUserData(handler: (update: BinanceOrderTradeUpdate) => void | Promise<void>): Promise<void> {
     if (this.connection !== null) throw new Error("Binance Testnet user stream is already connected");
     const response = await this.client.restAPI.startUserDataStream();
@@ -113,6 +142,7 @@ export class OfficialBinanceUsdsTestnetTransport implements BinanceTestnetTransp
     if (typeof listenKey !== "string" || listenKey.length === 0) {
       throw new Error("Binance Testnet did not return a listen key");
     }
+    this.userDataStreamOpen = true;
 
     this.connection = await this.client.websocketStreams.connect();
     this.stream = this.connection.userData(listenKey);
@@ -136,7 +166,8 @@ export class OfficialBinanceUsdsTestnetTransport implements BinanceTestnetTransp
       type: "MARKET",
       quantity: command.quantity,
       newClientOrderId: command.clientOrderId,
-      newOrderRespType: "ACK"
+      newOrderRespType: "ACK",
+      reduceOnly: command.reduceOnly
     });
   }
 
@@ -195,7 +226,10 @@ export class OfficialBinanceUsdsTestnetTransport implements BinanceTestnetTransp
       await this.connection.disconnect();
       this.connection = null;
     }
-    await this.client.restAPI.closeUserDataStream().catch(this.onError);
+    if (this.userDataStreamOpen) {
+      this.userDataStreamOpen = false;
+      await this.client.restAPI.closeUserDataStream().catch(this.onError);
+    }
   }
 }
 
@@ -258,6 +292,44 @@ export class BinanceUsdsTestnetVenue implements ExecutionVenue {
 
   async snapshot(): Promise<ExchangeStateSnapshot> {
     return this.transport.loadSnapshot(this.venueSymbol, this.canonicalSymbol);
+  }
+
+  /**
+   * Last-resort Testnet cleanup for an execution-smoke failure after entry.
+   * The order is reduce-only and sized from the authoritative venue snapshot.
+   */
+  async emergencyFlatten(referencePrice: number): Promise<ExchangeStateSnapshot> {
+    const snapshot = await this.snapshot();
+    if (snapshot.position.side === "FLAT") return snapshot;
+    if (snapshot.openOrders.length > 0) {
+      throw new Error("emergency flatten requires zero open orders; manual reconciliation required");
+    }
+    if (this.rules === null) throw new Error("Binance Testnet venue must be started before emergency flatten");
+    const request: OrderRequest = {
+      symbol: this.canonicalSymbol,
+      side: snapshot.position.side === "LONG" ? "SELL" : "BUY",
+      qty: snapshot.position.qty,
+      price: referencePrice,
+      reason: "TESTNET_EMERGENCY_REDUCE_ONLY_FLAT",
+      ts: Date.now()
+    };
+    validateMarketOrder(request, this.rules);
+    const clientOrderId = `${safeSymbol(this.canonicalSymbol)}-EMERGENCY-${Date.now()}`;
+    this.submitted.set(clientOrderId, request);
+    await this.transport.submitMarketOrder({
+      symbol: this.venueSymbol,
+      side: request.side,
+      quantity: request.qty,
+      clientOrderId,
+      reduceOnly: true
+    });
+    const deadline = Date.now() + 20_000;
+    while (Date.now() <= deadline) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+      const current = await this.snapshot();
+      if (current.position.side === "FLAT" && current.openOrders.length === 0) return current;
+    }
+    throw new Error("emergency reduce-only flatten did not reconcile FLAT");
   }
 
   async close(): Promise<void> {

@@ -20,6 +20,36 @@ test("freezes an explicit same-asset LONG mapping for Testnet execution smoke on
   });
   assert.equal(testnetDemoMapping("ETH").venueSymbol, "ETHUSDT");
   assert.equal(testnetDemoMapping("SOL").venueSymbol, "SOLUSDT");
+  assert.deepEqual(testnetDemoMapping("XRP"), {
+    version: TESTNET_DEMO_MAPPING_VERSION,
+    asset: "XRP",
+    canonicalSymbol: "XRP-PERP",
+    venueSymbol: "XRPUSDT",
+    quantity: 5,
+    side: "LONG",
+    purpose: "EXECUTION_SMOKE_ONLY",
+    directionalEdgeClaim: false
+  });
+  assert.deepEqual(testnetDemoMapping("DOGE", "SHORT"), {
+    version: TESTNET_DEMO_MAPPING_VERSION,
+    asset: "DOGE",
+    canonicalSymbol: "DOGE-PERP",
+    venueSymbol: "DOGEUSDT",
+    quantity: 100,
+    side: "SHORT",
+    purpose: "EXECUTION_SMOKE_ONLY",
+    directionalEdgeClaim: false
+  });
+  assert.equal(testnetDemoMapping("HYPE").venueSymbol, "HYPEUSDT");
+  assert.equal(testnetDemoMapping("BNB").venueSymbol, "BNBUSDT");
+});
+
+test("Hourly DOWN Candidate requests SHORT until Fill, then deterministic FLAT", () => {
+  const signal = new CandidateTestnetDemoSignal("HOURLY-DOWN", "SHORT");
+  const tick = { seq: 1, symbol: "DOGE-PERP", lastPrice: 1, markPrice: 1, indexPrice: 1, ts: 1 };
+  assert.equal(signal.onTick(tick).action, "SHORT");
+  signal.requestExit();
+  assert.equal(signal.onTick({ ...tick, seq: 2 }).action, "FLAT");
 });
 
 test("Candidate signal requests LONG until Fill, then deterministic FLAT", () => {
