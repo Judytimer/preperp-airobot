@@ -12,7 +12,7 @@ import {
 const START = 1_200_000;
 const END = START + 3_600_000;
 
-test("prospectively registers seven-asset supply and qualifies a fresh <=50c UP lag crossing", async () => {
+test("prospectively scans the 15-asset universe and qualifies a fresh <=50c UP lag crossing", async () => {
   const root = await mkdtemp(join(tmpdir(), "hourly-up-down-"));
   let clock = START - 60_000;
   const dependencies = {
@@ -22,6 +22,9 @@ test("prospectively registers seven-asset supply and qualifies a fresh <=50c UP 
   };
 
   const registered = await runHourlyUpDownCollectorCycle(root, dependencies);
+  assert.equal(registered.monitoredAssets.length, 15);
+  assert.deepEqual(registered.marketSuppliedAssets, ["BTC"]);
+  assert.equal(registered.blockedDiscoveries, 1);
   assert.equal(registered.registeredEpisodes, 1);
   assert.equal(registered.admission.waiting, 1);
 
@@ -52,6 +55,7 @@ function fakeFetch(now: () => number): typeof fetch {
   return async (input) => {
     const url = String(input);
     if (url.includes("gamma-api.polymarket.com")) {
+      if (url.includes("Cardano%20Up%20or%20Down")) return new Response("temporarily unavailable", { status: 503 });
       return json(url.includes("Bitcoin%20Up%20or%20Down") ? search([event()]) : search([]));
     }
     if (url.includes("clob.polymarket.com/book")) {

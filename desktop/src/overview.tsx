@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { readAutostart, writeAutostart } from "./autostart";
@@ -7,7 +8,18 @@ const healthyServicePhases = new Set<ServicePhase>(["SERVICE_READY_MODEL_COLD", 
 
 export function Overview() {
   const queryClient = useQueryClient();
-  const status = useQuery({ queryKey: ["system-status"], queryFn: fetchSystemStatus });
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const status = useQuery({
+    queryKey: ["system-status"],
+    queryFn: fetchSystemStatus,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
+    staleTime: 2_000
+  });
   const autostart = useQuery({ queryKey: ["autostart"], queryFn: readAutostart, retry: false });
   const toggleAutostart = useMutation({
     mutationFn: writeAutostart,
@@ -18,6 +30,9 @@ export function Overview() {
   const testnet = data?.predictionTestnet;
   const hourly = data?.hourlyWatcher;
   const hourlyCandidate = candidate?.variant === "HOURLY_UP_DOWN_V1";
+  const marketSupplied = useMemo(() => new Set(hourly?.marketSuppliedAssets ?? []), [hourly?.marketSuppliedAssets]);
+  const monitoredCount = hourly?.monitoredAssets.length ?? 15;
+  const suppliedCount = hourly?.marketSuppliedAssets.length ?? 0;
 
   return (
     <main className="shell">
@@ -32,11 +47,11 @@ export function Overview() {
       <section className="hero-grid">
         <article className="hero-card">
           <p className="label">当前任务</p>
-          <h2>{testnet?.phase === "ROUND_TRIP_COMPLETE" ? "预测信号测试网闭环已完成" : "监控 7 资产小时信号 + 4 资产日度信号"}</h2>
+          <h2>{testnet?.phase === "ROUND_TRIP_COMPLETE" ? "预测信号测试网闭环已完成" : `监控 ${monitoredCount} 资产小时发现池 + 4 资产日度池`}</h2>
           <p className="muted">采集器持续读取 Polymarket 与 Binance。小时 Up/Down 提高触发频率；新候选仍由确定性规则产生，量化机器人只执行一次测试网演示闭环。</p>
           <div className="authority-row"><Badge>{data?.authority.testnetDemoArmed ? "测试网已武装" : "测试网待机"}</Badge><Badge>实盘关闭</Badge><Badge>Laya 无下单权</Badge></div>
         </article>
-        <article className="clock-card"><p className="label">观测时间</p><div className="clock">{data ? formatTime(data.observedAt) : "--:--:--"}</div><p className="mono muted">{data ? shortCommit(data.build.commit) : "--------"} · v{data?.build.version ?? "—"}</p></article>
+        <article className="clock-card"><p className="label">本机观测时间</p><div className="clock" aria-live="off">{formatTime(clockNow)}</div><p className="mono muted">{data ? `状态同步 ${relativeTime(data.observedAt, clockNow)} · ${shortCommit(data.build.commit)}` : "正在连接本地运行时"}</p></article>
       </section>
 
       <section className="flow-panel">
@@ -47,7 +62,7 @@ export function Overview() {
           </FlowNode>
           <FlowArrow />
           <FlowNode index="02" title="确定性候选" state={candidate ? "QUALIFIED" : "等待触发"}>
-            <strong>{candidate ? candidateHeadline(candidate) : "7 资产小时池 / 4 资产日度池"}</strong><span>{candidate ? candidateCrossing(candidate) : "真实 1 分钟收盘触发"}</span><span>T0 {candidate ? formatDateTime(candidate.candidateT0) : "—"}</span>
+            <strong>{candidate ? candidateHeadline(candidate) : `${monitoredCount} 资产小时发现池 / 4 资产日度池`}</strong><span>{candidate ? candidateCrossing(candidate) : "真实 1 分钟收盘触发"}</span><span>T0 {candidate ? formatDateTime(candidate.candidateT0) : "—"}</span>
           </FlowNode>
           <FlowArrow />
           <FlowNode index="03" title="证据审核" state={hourlyCandidate ? "确定性规则" : localizeLaya(data?.layaReview.choice)}>
@@ -55,23 +70,34 @@ export function Overview() {
           </FlowNode>
           <FlowArrow />
           <FlowNode index="04" title="Binance 测试网" state={localizeTestnet(testnet?.phase)} accent>
-            <strong>{testnet?.venueSymbol ?? "等待候选后选择同资产合约"}</strong><span>当前可执行池 {testnet?.allowedAssets.join(" / ") || "BTC / ETH / SOL / XRP / DOGE / HYPE / BNB"}</span><span>成交后立即减仓至 FLAT</span>
+            <strong>{testnet?.venueSymbol ?? "等待候选后选择同资产合约"}</strong><span>测试网资产池 {testnet?.allowedAssets.length ?? monitoredCount} 个</span><span>成交后立即减仓至 FLAT</span>
           </FlowNode>
         </div>
       </section>
 
+      <section className="asset-panel" aria-label="资产覆盖">
+        <div className="asset-panel-heading">
+          <div><p className="label">资产覆盖</p><h3>{monitoredCount} 个高流动性 Binance 标的</h3></div>
+          <p><span className="asset-dot supplied" />当前 Polymarket 有合格市场 {suppliedCount} 个 <span className="asset-dot waiting" />等待市场供给 {Math.max(0, monitoredCount - suppliedCount)} 个</p>
+        </div>
+        <div className="asset-chips">
+          {(hourly?.monitoredAssets ?? []).map((asset) => <span key={asset} className={`asset-chip ${marketSupplied.has(asset) ? "supplied" : "waiting"}`}>{asset}</span>)}
+          {!hourly?.monitoredAssets.length && <span className="asset-empty">等待首次扩展资产扫描</span>}
+        </div>
+      </section>
+
       <section className="status-grid compact-grid">
-        <StatusCard index="01" title="日度 Price-Target" status={localizeWatcher(data?.watcher.phase)} healthy={data?.watcher.phase === "RUNNING"} detail={data?.watcher.latestCycleAt ? `最近一次采集：${relativeTime(data.watcher.latestCycleAt, data.observedAt)}` : "尚无采集记录"}>
+        <StatusCard index="01" title="日度 Price-Target" status={localizeWatcher(data?.watcher.phase)} healthy={data?.watcher.phase === "RUNNING"} detail={data?.watcher.latestCycleAt ? `最近一次采集：${relativeTime(data.watcher.latestCycleAt, clockNow)}` : "尚无采集记录"}>
           <Metric label="等待触发" value={data?.watcher.admission?.waiting ?? "—"} /><Metric label="合格合约" value={data?.watcher.admission?.qualified ?? "—"} accent /><Metric label="数据阻塞" value={data?.watcher.admission?.dataBlocked ?? "—"} />
         </StatusCard>
-        <StatusCard index="02" title="小时 Up/Down" status={localizeWatcher(hourly?.phase)} healthy={hourly?.phase === "RUNNING"} detail={hourly?.latestCycleAt && data ? `资产 ${hourly.monitoredAssets.join(" / ")} · ${relativeTime(hourly.latestCycleAt, data.observedAt)}` : "等待首轮小时市场扫描"}>
+        <StatusCard index="02" title="小时 Up/Down" status={localizeWatcher(hourly?.phase)} healthy={hourly?.phase === "RUNNING"} detail={hourly?.latestCycleAt ? `${monitoredCount} 个发现标的，${suppliedCount} 个当前有市场 · ${relativeTime(hourly.latestCycleAt, clockNow)}` : "等待首轮小时市场扫描"}>
           <Metric label="活跃 episode" value={hourly?.activeEpisodes ?? "—"} accent /><Metric label="等待触发" value={hourly?.admission?.waiting ?? "—"} /><Metric label="合格信号" value={hourly?.admission?.qualified ?? "—"} />
         </StatusCard>
         <StatusCard index="03" title="本地 Laya" status={localizeLayaService(data?.laya.phase)} healthy={data ? healthyServicePhases.has(data.laya.phase) : false} detail={data?.laya.detail ?? (data?.laya.loadedModels.length ? `${data.laya.loadedModels.join(", ")} · ${data.laya.device ?? "设备未知"}` : "本地模型服务")}>
           <Metric label="已加载模型" value={data?.laya.loadedModels.length ?? "—"} /><Metric label="推理耗时" value={formatDuration(data?.layaReview.inferenceMs)} /><Metric label="下单权限" value="无" />
         </StatusCard>
         <StatusCard index="04" title="测试网执行器" status={localizeTestnet(testnet?.phase)} healthy={testnet?.phase === "ARMED_WAITING_CANDIDATE" || testnet?.phase === "ROUND_TRIP_COMPLETE"} detail={testnet?.detail ?? "只消费启动后出现的新候选；不会使用历史候选补单。"}>
-          <Metric label="监听资产" value={testnet?.allowedAssets.join("/") || "—"} /><Metric label="目标合约" value={testnet?.venueSymbol ?? "自动选择"} accent /><Metric label="候选" value={testnet?.candidateId ? "已捕捉" : "等待中"} />
+          <Metric label="资产池" value={testnet?.allowedAssets.length ?? "—"} /><Metric label="目标合约" value={testnet?.venueSymbol ?? "自动选择"} accent /><Metric label="候选" value={testnet?.candidateId ? "已捕捉" : "等待中"} />
         </StatusCard>
         <StatusCard index="05" title="本地常驻" status={data?.supervisor.resident ? "后台监督中" : "未启动"} healthy={data?.supervisor.resident === true} detail={data ? `每 ${Math.round(data.supervisor.cadenceMs / 1_000)} 秒检查 watcher 与 Laya；测试网不会自动重新武装。` : "等待本地 supervisor 状态"} action={
           <div className="autostart-control">

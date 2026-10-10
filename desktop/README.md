@@ -139,9 +139,9 @@ LAYA_BASE_URL
 | Lane | 资产 |
 |---|---|
 | Daily Price-Target | BTC / ETH / SOL / XRP |
-| Hourly Up/Down | BTC / ETH / SOL / XRP / DOGE / HYPE / BNB |
+| Hourly Up/Down | BTC / ETH / SOL / XRP / DOGE / HYPE / BNB / ADA / LINK / AVAX / SUI / LTC / BCH / DOT / TRX |
 
-Testnet one-shot consumer 监听七个小时级资产。小时 Candidate 的演示映射是：
+小时 discovery 与 Testnet one-shot consumer 已覆盖 15 个 Binance Spot/Perp 双侧可用资产；没有真实 Polymarket 同语义合约的资产只保留在等待市场供给状态，不产生 Candidate。小时 Candidate 的演示映射是：
 
 ```text
 UP   → Testnet LONG

@@ -42,6 +42,14 @@ test("freezes an explicit same-asset LONG mapping for Testnet execution smoke on
   });
   assert.equal(testnetDemoMapping("HYPE").venueSymbol, "HYPEUSDT");
   assert.equal(testnetDemoMapping("BNB").venueSymbol, "BNBUSDT");
+  assert.equal(testnetDemoMapping("ADA").quantity, 40);
+  assert.equal(testnetDemoMapping("LINK").venueSymbol, "LINKUSDT");
+  assert.equal(testnetDemoMapping("AVAX").venueSymbol, "AVAXUSDT");
+  assert.equal(testnetDemoMapping("SUI").venueSymbol, "SUIUSDT");
+  assert.equal(testnetDemoMapping("LTC").quantity, 0.1);
+  assert.equal(testnetDemoMapping("BCH").quantity, 0.02);
+  assert.equal(testnetDemoMapping("DOT").quantity, 5);
+  assert.equal(testnetDemoMapping("TRX").quantity, 20);
 });
 
 test("Hourly DOWN Candidate requests SHORT until Fill, then deterministic FLAT", () => {

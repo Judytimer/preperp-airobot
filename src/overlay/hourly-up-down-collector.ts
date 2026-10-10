@@ -6,7 +6,10 @@ import { resolveRepositoryCommit } from "../build-identity.ts";
 import { runtimeEvidencePath } from "../runtime-paths.ts";
 
 export const HOURLY_UP_DOWN_PROTOCOL = "HOURLY_UP_DOWN_V1_0_0" as const;
-export const HOURLY_UP_DOWN_ASSETS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "HYPE", "BNB"] as const;
+export const HOURLY_UP_DOWN_ASSETS = [
+  "BTC", "ETH", "SOL", "XRP", "DOGE", "HYPE", "BNB",
+  "ADA", "LINK", "AVAX", "SUI", "LTC", "BCH", "DOT", "TRX"
+] as const;
 export const HOURLY_UP_DOWN_BOOK_MAX_STALENESS_MS = 120_000;
 export const HOURLY_UP_DOWN_MAX_ENTRY_ASK = 0.5;
 const INTERVAL_MS = 60_000;
@@ -28,7 +31,15 @@ const ASSET_CONFIG: Record<HourlyUpDownAsset, {
   XRP: { label: "XRP", symbol: "XRPUSDT", resolutionVenue: "BINANCE_SPOT" },
   DOGE: { label: "Dogecoin", symbol: "DOGEUSDT", resolutionVenue: "BINANCE_SPOT" },
   HYPE: { label: "HYPE", symbol: "HYPEUSDT", resolutionVenue: "BINANCE_FUTURES" },
-  BNB: { label: "BNB", symbol: "BNBUSDT", resolutionVenue: "BINANCE_SPOT" }
+  BNB: { label: "BNB", symbol: "BNBUSDT", resolutionVenue: "BINANCE_SPOT" },
+  ADA: { label: "Cardano", symbol: "ADAUSDT", resolutionVenue: "BINANCE_SPOT" },
+  LINK: { label: "Chainlink", symbol: "LINKUSDT", resolutionVenue: "BINANCE_SPOT" },
+  AVAX: { label: "Avalanche", symbol: "AVAXUSDT", resolutionVenue: "BINANCE_SPOT" },
+  SUI: { label: "Sui", symbol: "SUIUSDT", resolutionVenue: "BINANCE_SPOT" },
+  LTC: { label: "Litecoin", symbol: "LTCUSDT", resolutionVenue: "BINANCE_SPOT" },
+  BCH: { label: "Bitcoin Cash", symbol: "BCHUSDT", resolutionVenue: "BINANCE_SPOT" },
+  DOT: { label: "Polkadot", symbol: "DOTUSDT", resolutionVenue: "BINANCE_SPOT" },
+  TRX: { label: "TRON", symbol: "TRXUSDT", resolutionVenue: "BINANCE_SPOT" }
 };
 
 type Artifact = {
@@ -115,6 +126,7 @@ export type HourlyUpDownSummary = {
   readonly status: "HOURLY_UP_DOWN_CYCLE_RECORDED";
   readonly recordedAt: number;
   readonly monitoredAssets: readonly HourlyUpDownAsset[];
+  readonly marketSuppliedAssets: readonly HourlyUpDownAsset[];
   readonly discoveredEpisodes: number;
   readonly registeredEpisodes: number;
   readonly activeEpisodes: number;
@@ -146,13 +158,20 @@ export async function runHourlyUpDownCollectorCycle(
 
   const blocked: string[] = [];
   const discovery = await Promise.all(HOURLY_UP_DOWN_ASSETS.map(async (asset) => {
-    const config = ASSET_CONFIG[asset];
-    const url = `https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(`${config.label} Up or Down`)}&limit_per_type=${SEARCH_LIMIT}&events_status=active&page=1`;
-    const { raw, retrievedAt } = await fetchRaw(url, fetcher, now, timeoutMs, `Polymarket ${asset} Up/Down discovery`);
-    const artifact = await archiveRaw(root, "POLYMARKET_GAMMA", `gamma/${asset}`, url, retrievedAt, raw);
-    return parseDiscovery(asset, raw, retrievedAt, artifact, blocked);
+    try {
+      const config = ASSET_CONFIG[asset];
+      const url = `https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(`${config.label} Up or Down`)}&limit_per_type=${SEARCH_LIMIT}&events_status=active&page=1`;
+      const { raw, retrievedAt } = await fetchRaw(url, fetcher, now, timeoutMs, `Polymarket ${asset} Up/Down discovery`);
+      const artifact = await archiveRaw(root, "POLYMARKET_GAMMA", `gamma/${asset}`, url, retrievedAt, raw);
+      return parseDiscovery(asset, raw, retrievedAt, artifact, blocked);
+    } catch (error) {
+      blocked.push(`${asset} discovery: ${errorText(error)}`);
+      return [];
+    }
   }));
   const episodes = discovery.flat().sort((left, right) => left.measurementStart - right.measurementStart || left.asset.localeCompare(right.asset));
+  const supplied = new Set(episodes.map((episode) => episode.asset));
+  const marketSuppliedAssets = HOURLY_UP_DOWN_ASSETS.filter((asset) => supplied.has(asset));
   const manifests = await loadManifests(root);
   let registeredEpisodes = 0;
   for (const episode of episodes) {
@@ -217,6 +236,7 @@ export async function runHourlyUpDownCollectorCycle(
     status: "HOURLY_UP_DOWN_CYCLE_RECORDED" as const,
     recordedAt,
     monitoredAssets: HOURLY_UP_DOWN_ASSETS,
+    marketSuppliedAssets,
     discoveredEpisodes: episodes.length,
     registeredEpisodes,
     activeEpisodes,

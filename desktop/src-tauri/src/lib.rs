@@ -146,6 +146,7 @@ struct HourlyWatcherStatus {
     latest_cycle_at: Option<u64>,
     latest_scan_path: Option<String>,
     monitored_assets: Vec<String>,
+    market_supplied_assets: Vec<String>,
     discovered_episodes: u64,
     active_episodes: u64,
     admission: Option<HourlyAdmissionStatus>,
@@ -694,6 +695,17 @@ fn read_hourly_watcher_status(evidence_root: &Path, observed_at: u64) -> HourlyW
                     .collect()
             })
             .unwrap_or_default(),
+        market_supplied_assets: parsed
+            .get("marketSuppliedAssets")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
         discovered_episodes: json_u64(&parsed, "discoveredEpisodes"),
         active_episodes: json_u64(&parsed, "activeEpisodes"),
         admission,
@@ -947,6 +959,7 @@ fn empty_hourly_watcher(phase: &'static str) -> HourlyWatcherStatus {
         latest_cycle_at: None,
         latest_scan_path: None,
         monitored_assets: Vec::new(),
+        market_supplied_assets: Vec::new(),
         discovered_episodes: 0,
         active_episodes: 0,
         admission: None,
@@ -1156,6 +1169,9 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--background"]),

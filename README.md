@@ -98,9 +98,9 @@ Prediction 监控分成两条独立 lane：
 | Lane | 当前资产 | 研究对象 |
 |---|---|---|
 | Daily Price-Target | BTC / ETH / SOL / XRP | 固定日期价格阈值合约 |
-| Hourly Up/Down | BTC / ETH / SOL / XRP / DOGE / HYPE / BNB | Binance 1h candle 方向合约 |
+| Hourly Up/Down | BTC / ETH / SOL / XRP / DOGE / HYPE / BNB / ADA / LINK / AVAX / SUI / LTC / BCH / DOT / TRX | Binance 1h candle 方向合约 |
 
-这 7 个小时级资产是审计时满足以下条件的真实交集，不是对所有高流动性币种的永久上限：
+小时发现池已扩展到 15 个同时拥有 Binance Spot 与 USDⓈ-M Perp 的高流动性资产。当前 Polymarket 实时供给仍主要集中在原 7 个资产；新增 8 个只在真实同语义市场出现后才会注册 Candidate，不会因扩大列表伪造信号：
 
 ```text
 Polymarket 有相同语义的活跃合约
@@ -108,7 +108,7 @@ Polymarket 有相同语义的活跃合约
 + Binance Futures Testnet 有对应 USDT perpetual
 ```
 
-仅在 Binance 上成交活跃、但没有对应 Prediction contract 的资产，不会被伪造成策略信号。
+桌面端会把“已配置发现资产”和“当前确有 Prediction 市场的资产”分色显示。仅在 Binance 上成交活跃、但没有对应 Prediction contract 的资产，不会被伪造成策略信号。
 
 ### 小时 Candidate 的确定性规则
 

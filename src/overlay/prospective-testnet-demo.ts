@@ -46,8 +46,8 @@ export type TestnetPredictionCandidate = ProspectivePaperCandidate | HourlyUpDow
 export type TestnetDemoMapping = {
   readonly version: typeof TESTNET_DEMO_MAPPING_VERSION;
   readonly asset: PredictionDemoAsset;
-  readonly canonicalSymbol: "BTC-PERP" | "ETH-PERP" | "SOL-PERP" | "XRP-PERP" | "DOGE-PERP" | "HYPE-PERP" | "BNB-PERP";
-  readonly venueSymbol: "BTCUSDT" | "ETHUSDT" | "SOLUSDT" | "XRPUSDT" | "DOGEUSDT" | "HYPEUSDT" | "BNBUSDT";
+  readonly canonicalSymbol: `${PredictionDemoAsset}-PERP`;
+  readonly venueSymbol: `${PredictionDemoAsset}USDT`;
   readonly side: "LONG" | "SHORT";
   readonly quantity: number;
   readonly purpose: "EXECUTION_SMOKE_ONLY";
@@ -123,7 +123,15 @@ export function testnetDemoMapping(asset: PredictionDemoAsset, side: "LONG" | "S
     XRP: { canonicalSymbol: "XRP-PERP", venueSymbol: "XRPUSDT", quantity: 5 },
     DOGE: { canonicalSymbol: "DOGE-PERP", venueSymbol: "DOGEUSDT", quantity: 100 },
     HYPE: { canonicalSymbol: "HYPE-PERP", venueSymbol: "HYPEUSDT", quantity: 0.2 },
-    BNB: { canonicalSymbol: "BNB-PERP", venueSymbol: "BNBUSDT", quantity: 0.01 }
+    BNB: { canonicalSymbol: "BNB-PERP", venueSymbol: "BNBUSDT", quantity: 0.01 },
+    ADA: { canonicalSymbol: "ADA-PERP", venueSymbol: "ADAUSDT", quantity: 40 },
+    LINK: { canonicalSymbol: "LINK-PERP", venueSymbol: "LINKUSDT", quantity: 1 },
+    AVAX: { canonicalSymbol: "AVAX-PERP", venueSymbol: "AVAXUSDT", quantity: 1 },
+    SUI: { canonicalSymbol: "SUI-PERP", venueSymbol: "SUIUSDT", quantity: 10 },
+    LTC: { canonicalSymbol: "LTC-PERP", venueSymbol: "LTCUSDT", quantity: 0.1 },
+    BCH: { canonicalSymbol: "BCH-PERP", venueSymbol: "BCHUSDT", quantity: 0.02 },
+    DOT: { canonicalSymbol: "DOT-PERP", venueSymbol: "DOTUSDT", quantity: 5 },
+    TRX: { canonicalSymbol: "TRX-PERP", venueSymbol: "TRXUSDT", quantity: 20 }
   } as const satisfies Record<PredictionDemoAsset, {
     canonicalSymbol: TestnetDemoMapping["canonicalSymbol"];
     venueSymbol: TestnetDemoMapping["venueSymbol"];
@@ -338,14 +346,14 @@ function configuredArmedAt(fallback: number): number {
 }
 
 function configuredAllowedAssets(): readonly PredictionDemoAsset[] {
-  const values = (process.env.PREDICTION_TESTNET_ASSETS ?? "BTC,ETH,SOL,XRP,DOGE,HYPE,BNB")
+  const values = (process.env.PREDICTION_TESTNET_ASSETS ?? "BTC,ETH,SOL,XRP,DOGE,HYPE,BNB,ADA,LINK,AVAX,SUI,LTC,BCH,DOT,TRX")
     .split(",")
     .map((value) => value.trim().toUpperCase())
     .filter((value) => value.length > 0);
   const assets = [...new Set(values)] as PredictionDemoAsset[];
   if (
     assets.length === 0 ||
-    assets.some((asset) => !["BTC", "ETH", "SOL", "XRP", "DOGE", "HYPE", "BNB"].includes(asset))
+    assets.some((asset) => !["BTC", "ETH", "SOL", "XRP", "DOGE", "HYPE", "BNB", "ADA", "LINK", "AVAX", "SUI", "LTC", "BCH", "DOT", "TRX"].includes(asset))
   ) {
     throw new Error("PREDICTION_TESTNET_ASSETS contains an unsupported Prediction demo asset");
   }

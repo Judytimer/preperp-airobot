@@ -9,7 +9,7 @@ export type SystemStatus = {
     readonly commit: string;
   };
   readonly runtime: {
-    readonly mode: "DEVELOPMENT" | "PACKAGED";
+    readonly mode: "DEVELOPMENT" | "LOCAL_WORKSPACE" | "PACKAGED";
     readonly dataRoot: string;
     readonly evidenceRoot: string;
     readonly stateRoot: string;
@@ -54,6 +54,7 @@ export type SystemStatus = {
     readonly latestCycleAt: number | null;
     readonly latestScanPath: string | null;
     readonly monitoredAssets: readonly string[];
+    readonly marketSuppliedAssets: readonly string[];
     readonly discoveredEpisodes: number;
     readonly activeEpisodes: number;
     readonly admission: {
