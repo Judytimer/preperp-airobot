@@ -15,10 +15,15 @@ use tauri::{
     AppHandle, Manager, State, WindowEvent,
 };
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 const LAYA_DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8000";
 const WATCHER_FRESH_MS: u64 = 150_000;
 const TESTNET_RUNNER_FRESH_MS: u64 = 20_000;
 const SUPERVISOR_CADENCE_MS: u64 = 30_000;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct AppState {
     runtime: RuntimePaths,
@@ -244,7 +249,8 @@ async fn ensure_laya_inner(state: &AppState) -> Result<(), String> {
         File::create(state.runtime.log_root.join("laya-desktop.stdout.log")).map_err(error_text)?;
     let stderr =
         File::create(state.runtime.log_root.join("laya-desktop.stderr.log")).map_err(error_text)?;
-    let child = Command::new(&python)
+    let mut command = Command::new(&python);
+    command
         .args(["-m", "laya.serve"])
         .current_dir(&laya_root)
         .env("LAYA_HOST", "127.0.0.1")
@@ -253,9 +259,9 @@ async fn ensure_laya_inner(state: &AppState) -> Result<(), String> {
         .env("LAYA_PRELOAD", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
-        .spawn()
-        .map_err(error_text)?;
+        .stderr(Stdio::from(stderr));
+    hide_background_window(&mut command);
+    let child = command.spawn().map_err(error_text)?;
     *child_guard = Some(child);
     Ok(())
 }
@@ -321,6 +327,7 @@ async fn ensure_watcher_inner(state: &AppState) -> Result<(), String> {
     if state.runtime.mode == "PACKAGED" {
         command.env("PREPERP_DATA_ROOT", &state.runtime.data_root);
     }
+    hide_background_window(&mut command);
     let child = command.spawn().map_err(error_text)?;
     let mut child_guard = state
         .watcher_child
@@ -413,7 +420,10 @@ async fn ensure_prediction_testnet_inner(state: &AppState) -> Result<(), String>
             "src/overlay/prospective-testnet-demo.ts",
         ])
         .current_dir(&state.workspace_root)
-        .env("PREDICTION_TESTNET_ASSETS", "BTC,ETH,SOL,XRP,DOGE,HYPE,BNB")
+        .env(
+            "PREDICTION_TESTNET_ASSETS",
+            "BTC,ETH,SOL,XRP,DOGE,HYPE,BNB,ADA,LINK,AVAX,SUI,LTC,BCH,DOT,TRX",
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
@@ -423,6 +433,7 @@ async fn ensure_prediction_testnet_inner(state: &AppState) -> Result<(), String>
     if state.runtime.mode == "PACKAGED" {
         command.env("PREPERP_DATA_ROOT", &state.runtime.data_root);
     }
+    hide_background_window(&mut command);
     let child = command.spawn().map_err(error_text)?;
     let mut child_guard = state
         .testnet_child
@@ -1057,6 +1068,17 @@ fn now_ms() -> Result<u64, String> {
 
 fn error_text(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+fn hide_background_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
 }
 
 fn start_runtime_supervisor(app: AppHandle) {
