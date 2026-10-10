@@ -15,6 +15,7 @@
     "@tanstack/react-query": "^5.90.5",
     "@tanstack/react-router": "^1.132.47",
     "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-autostart": "^2.7.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

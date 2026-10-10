@@ -156,9 +156,11 @@ Tauri 2
 - 本地 Laya 服务与 Shadow Review；
 - Binance Testnet consumer 状态；
 - ACK、Fill、Position、FLAT 和 reconciliation 结果；
+- watcher / Laya 本地常驻与最后心跳；
+- Windows 登录后启动开关和“云端 AI = 0”边界；
 - 明确的 Mainnet / AI 权限边界。
 
-Renderer 不能执行任意 shell 命令，也不接收交易所密钥。Rust host 只暴露固定命令，并监督唯一 watcher 与一次性 Testnet consumer。
+Renderer 不能执行任意 shell 命令，也不接收交易所密钥。Rust host 启动后独立监督唯一 watcher 与本地 Laya；关闭窗口只隐藏到系统托盘。Testnet 不随桌面启动或开机自启而重新武装。
 
 ## Testnet 安全边界
 
@@ -232,6 +234,14 @@ npm run desktop:check
 ```bash
 npm run desktop:dev
 ```
+
+构建 Windows 安装程序：
+
+```bash
+npm run desktop:build
+```
+
+NSIS 安装程序输出到 `desktop/src-tauri/target/release/bundle/nsis/`。安装后可直接从 Windows 开始菜单启动，不需要 Codex。开机启动默认关闭，可在控制台中显式开启。
 
 CLI 模式持续采集：
 

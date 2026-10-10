@@ -74,6 +74,14 @@ export type SystemStatus = {
     readonly evidencePath: string | null;
     readonly detail: string | null;
   };
+  readonly supervisor: {
+    readonly resident: boolean;
+    readonly startedAt: number;
+    readonly cadenceMs: number;
+    readonly cloudAiRequired: boolean;
+    readonly layaLocalOnly: boolean;
+    readonly testnetAutoArm: boolean;
+  };
   readonly latestCandidate: {
     readonly variant: "PRICE_TARGET_V1" | "HOURLY_UP_DOWN_V1";
     readonly candidateId: string;
@@ -99,14 +107,6 @@ export type SystemStatus = {
   };
 };
 
-let ensureLayaPromise: Promise<void> | null = null;
-
 export async function fetchSystemStatus(): Promise<SystemStatus> {
-  ensureLayaPromise ??= invoke<void>("ensure_laya").catch(() => undefined);
-  await Promise.all([
-    ensureLayaPromise,
-    invoke<void>("ensure_watcher").catch(() => undefined),
-    invoke<void>("ensure_prediction_testnet").catch(() => undefined)
-  ]);
   return invoke<SystemStatus>("system_status");
 }

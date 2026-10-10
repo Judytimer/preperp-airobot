@@ -28,7 +28,8 @@
     "smoke:prediction:testnet": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/overlay/prospective-testnet-demo.ts",
     "desktop:install": "npm --prefix desktop install",
     "desktop:dev": "npm --prefix desktop run tauri:dev",
-    "desktop:build": "npm --prefix desktop run build",
+    "desktop:frontend": "npm --prefix desktop run build",
+    "desktop:build": "npm --prefix desktop run tauri:build",
     "desktop:check": "npm --prefix desktop run build && cargo check --manifest-path desktop/src-tauri/Cargo.toml",
     "replay": "node --experimental-strip-types src/replay-index.ts",
     "test": "node --experimental-strip-types --test test/*.test.ts"

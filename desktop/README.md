@@ -18,9 +18,14 @@ PrePerp Control Room 是一个基于 Tauri 的本地量化运行时观察与监�
 - 展示 Candidate、T0、方向、YES ask 与证据边界；
 - 展示 Binance Testnet 的 ACK、Fill、Position、FLAT 和 reconciliation 状态；
 - 展示冻结的 AI、Testnet 与 Mainnet 权限边界；
-- 武装一个多资产 `TESTNET_DEMO_ONLY_V1` one-shot consumer。
+- 展示一个已经完成或显式武装的多资产 `TESTNET_DEMO_ONLY_V1` one-shot consumer；
+- 启动后由 Rust supervisor 自动维护 watcher 与本地 Laya；
+- 关闭窗口后驻留 Windows 系统托盘；
+- 提供“Windows 登录后启动”开关。
 
 One-shot consumer 只等待启动后出现的新 prospective Candidate。命中后，它会执行一次极小 Binance Futures Testnet round trip，权威确认 `FLAT`、写入不可变 evidence，然后自动退出。
+
+桌面应用启动不会自动重新武装 Testnet。后台常驻只负责确定性观测采集和本地 Laya 可用性，避免安装版因新数据目录产生第二笔演示订单。
 
 ## 明确不能做什么
 
@@ -82,6 +87,30 @@ npm run desktop:dev
 npm run desktop:check
 ```
 
+## Windows 安装与日常启动
+
+生成本机 NSIS 安装程序：
+
+```powershell
+npm run desktop:build
+```
+
+安装程序生成在：
+
+```text
+desktop/src-tauri/target/release/bundle/nsis/
+```
+
+安装后可从 Windows 开始菜单的 `PrePerp` 文件夹启动。窗口右上角关闭只会隐藏到系统托盘；托盘菜单中的“退出并停止本地采集”才会结束 watcher 和由桌面端启动的 Laya。
+
+控制台里的“Windows 登录后启动”默认关闭，由用户显式开启。登录自启时应用隐藏到托盘，watcher 仍按 60 秒 cadence 工作。
+
+```text
+watcher：确定性 Node.js 规则，不调用 Codex，不消耗云端 token
+Laya：仅 loopback 本地推理，只在需要审核新 Candidate 时产生推理负载
+Testnet：不会因桌面启动或登录自启而重新武装
+```
+
 开发模式读取仓库现有的：
 
 ```text
@@ -89,7 +118,7 @@ work/
 .runtime/
 ```
 
-打包后的 host 应显式设置 `PREPERP_DATA_ROOT`；未设置时，release build 使用 Tauri application-data directory。
+在构建这台电脑上的安装包时，release build 会优先复用构建时仓库的 `work/` 与 `.runtime/`，从而保留已有 evidence 和 one-shot 完成状态。如果仓库入口不存在，则退回 Tauri application-data directory；此时 watcher 会因为缺少受信任的源码入口而 fail closed。
 
 可选 runtime overrides：
 

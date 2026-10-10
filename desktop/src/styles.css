@@ -45,7 +45,7 @@ button, input { font: inherit; }
 .clock-card p:last-child { font-size: 11px; margin-bottom: 0; }
 
 .status-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 14px; }
-.compact-grid { grid-template-columns: repeat(4, 1fr); }
+.compact-grid { grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); }
 .status-card { padding: 22px; min-height: 270px; position: relative; overflow: hidden; }
 .status-card::after { content: ""; position: absolute; width: 100px; height: 100px; border: 1px solid rgba(255,255,255,.025); border-radius: 50%; right: -38px; top: -48px; }
 .status-heading { display: flex; justify-content: space-between; align-items: center; }
@@ -63,6 +63,11 @@ button, input { font: inherit; }
 .metrics dt { font-size: 10px; color: var(--muted); }
 .metrics dd { margin: 6px 0 0; font: 17px ui-monospace, monospace; }
 .metrics dd.accent { color: var(--green); }
+.autostart-control { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.toggle { position: relative; z-index: 1; min-width: 68px; border: 1px solid #4b574f; padding: 6px 9px; color: #bec7c1; background: #171d1a; cursor: pointer; }
+.toggle.enabled { border-color: #4f7d5a; color: var(--green); background: rgba(95,214,127,.08); }
+.toggle:disabled { cursor: not-allowed; opacity: .55; }
+.toggle:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
 .flow-panel { margin-top: 14px; padding: 24px 26px 27px; border: 1px solid var(--line); background: linear-gradient(145deg, rgba(21,27,24,.94), rgba(13,18,16,.96)); }
 .flow-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
@@ -100,5 +105,5 @@ footer { display: flex; justify-content: space-between; padding: 19px 2px 0; col
 
 @media (min-width: 1051px) and (max-width: 1260px) {
   .status-grid { grid-template-columns: repeat(2, 1fr); }
-  .compact-grid { grid-template-columns: repeat(2, 1fr); }
+  .compact-grid { grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); }
 }

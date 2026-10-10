@@ -1,11 +1,18 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { readAutostart, writeAutostart } from "./autostart";
 import { fetchSystemStatus, type ServicePhase, type SystemStatus } from "./system-status";
 
 const healthyServicePhases = new Set<ServicePhase>(["SERVICE_READY_MODEL_COLD", "MODEL_READY"]);
 
 export function Overview() {
+  const queryClient = useQueryClient();
   const status = useQuery({ queryKey: ["system-status"], queryFn: fetchSystemStatus });
+  const autostart = useQuery({ queryKey: ["autostart"], queryFn: readAutostart, retry: false });
+  const toggleAutostart = useMutation({
+    mutationFn: writeAutostart,
+    onSuccess: (enabled) => queryClient.setQueryData(["autostart"], enabled)
+  });
   const data = status.data;
   const candidate = data?.latestCandidate;
   const testnet = data?.predictionTestnet;
@@ -66,6 +73,22 @@ export function Overview() {
         <StatusCard index="04" title="测试网执行器" status={localizeTestnet(testnet?.phase)} healthy={testnet?.phase === "ARMED_WAITING_CANDIDATE" || testnet?.phase === "ROUND_TRIP_COMPLETE"} detail={testnet?.detail ?? "只消费启动后出现的新候选；不会使用历史候选补单。"}>
           <Metric label="监听资产" value={testnet?.allowedAssets.join("/") || "—"} /><Metric label="目标合约" value={testnet?.venueSymbol ?? "自动选择"} accent /><Metric label="候选" value={testnet?.candidateId ? "已捕捉" : "等待中"} />
         </StatusCard>
+        <StatusCard index="05" title="本地常驻" status={data?.supervisor.resident ? "后台监督中" : "未启动"} healthy={data?.supervisor.resident === true} detail={data ? `每 ${Math.round(data.supervisor.cadenceMs / 1_000)} 秒检查 watcher 与 Laya；测试网不会自动重新武装。` : "等待本地 supervisor 状态"} action={
+          <div className="autostart-control">
+            <span>Windows 登录后启动</span>
+            <button
+              type="button"
+              className={autostart.data ? "toggle enabled" : "toggle"}
+              disabled={autostart.isPending || autostart.isError || toggleAutostart.isPending}
+              onClick={() => toggleAutostart.mutate(!autostart.data)}
+              aria-pressed={autostart.data === true}
+            >
+              {toggleAutostart.isPending ? "保存中" : autostart.data ? "已开启" : autostart.isError ? "不可用" : "未开启"}
+            </button>
+          </div>
+        }>
+          <Metric label="采集规则" value="本地确定性" /><Metric label="云端 AI" value={data?.supervisor.cloudAiRequired ? "需要" : "0 / 不需要"} accent /><Metric label="Laya" value={data?.supervisor.layaLocalOnly ? "仅本机" : "—"} />
+        </StatusCard>
       </section>
 
       <section className="runtime-panel"><div><p className="label">本地运行边界</p><h3>可检查、可追溯、失败即关闭</h3></div><dl className="path-list"><PathRow label="模式" value={data?.runtime.mode ?? "—"} /><PathRow label="证据" value={data?.runtime.evidenceRoot ?? "—"} /><PathRow label="状态" value={data?.runtime.stateRoot ?? "—"} /><PathRow label="日志" value={data?.runtime.logRoot ?? "—"} /></dl></section>
@@ -84,7 +107,7 @@ function runtimeErrorText(error: unknown): string {
 
 function FlowNode({ index, title, state, accent = false, children }: { readonly index: string; readonly title: string; readonly state: string; readonly accent?: boolean; readonly children: React.ReactNode }) { return <article className={`flow-node ${accent ? "accent-node" : ""}`}><div className="flow-node-top"><span>{index}</span><em>{state}</em></div><h4>{title}</h4><div className="flow-copy">{children}</div></article>; }
 function FlowArrow() { return <div className="flow-arrow" aria-hidden="true">→</div>; }
-function StatusCard(props: { readonly index: string; readonly title: string; readonly status: string; readonly healthy: boolean; readonly detail: string; readonly children: React.ReactNode }) { return <article className="status-card"><div className="status-heading"><span className="card-index">{props.index}</span><span className={`status-dot ${props.healthy ? "healthy" : "warning"}`} /></div><h3>{props.title}</h3><p className={`status-word ${props.healthy ? "healthy-text" : "warning-text"}`}>{props.status}</p><p className="card-detail">{props.detail}</p><dl className="metrics">{props.children}</dl></article>; }
+function StatusCard(props: { readonly index: string; readonly title: string; readonly status: string; readonly healthy: boolean; readonly detail: string; readonly children: React.ReactNode; readonly action?: React.ReactNode }) { return <article className="status-card"><div className="status-heading"><span className="card-index">{props.index}</span><span className={`status-dot ${props.healthy ? "healthy" : "warning"}`} /></div><h3>{props.title}</h3><p className={`status-word ${props.healthy ? "healthy-text" : "warning-text"}`}>{props.status}</p><p className="card-detail">{props.detail}</p><dl className="metrics">{props.children}</dl>{props.action}</article>; }
 function Metric({ label, value, accent = false }: { readonly label: string; readonly value: string | number; readonly accent?: boolean }) { return <div><dt>{label}</dt><dd className={accent ? "accent" : ""}>{value}</dd></div>; }
 function PathRow({ label, value }: { readonly label: string; readonly value: string }) { return <div><dt>{label}</dt><dd className="mono" title={value}>{value}</dd></div>; }
 function Badge({ children }: { readonly children: React.ReactNode }) { return <span className="badge safe">{children}</span>; }

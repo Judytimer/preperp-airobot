@@ -27,6 +27,19 @@
     }
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "targets": ["nsis"],
+    "useLocalToolsDir": true,
+    "publisher": "PrePerp",
+    "category": "Finance",
+    "shortDescription": "PrePerp 本地量化运行时与证据控制台",
+    "longDescription": "在本机常驻监督 Prediction watcher、本地 Laya shadow review 与 Binance Futures Testnet 证据。",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "startMenuFolder": "PrePerp"
+      }
+    }
   }
 }

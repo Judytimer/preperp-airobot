@@ -2,17 +2,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     env,
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager, State, WindowEvent,
+};
 
 const LAYA_DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8000";
 const WATCHER_FRESH_MS: u64 = 150_000;
 const TESTNET_RUNNER_FRESH_MS: u64 = 20_000;
+const SUPERVISOR_CADENCE_MS: u64 = 30_000;
 
 struct AppState {
     runtime: RuntimePaths,
@@ -22,6 +28,7 @@ struct AppState {
     watcher_child: Mutex<Option<Child>>,
     testnet_child: Mutex<Option<Child>>,
     client: reqwest::Client,
+    started_at: u64,
 }
 
 #[derive(Clone)]
@@ -45,7 +52,19 @@ struct SystemStatus {
     hourly_watcher: HourlyWatcherStatus,
     latest_candidate: Option<CandidateStatus>,
     prediction_testnet: PredictionTestnetStatus,
+    supervisor: SupervisorStatus,
     authority: AuthorityStatus,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SupervisorStatus {
+    resident: bool,
+    started_at: u64,
+    cadence_ms: u64,
+    cloud_ai_required: bool,
+    laya_local_only: bool,
+    testnet_auto_arm: bool,
 }
 
 #[derive(Serialize)]
@@ -186,14 +205,24 @@ struct AuthorityStatus {
 
 #[tauri::command]
 async fn ensure_laya(state: State<'_, AppState>) -> Result<(), String> {
-    if fetch_laya_health(&state.client, &state.laya_endpoint).await.is_ok() {
+    ensure_laya_inner(state.inner()).await
+}
+
+async fn ensure_laya_inner(state: &AppState) -> Result<(), String> {
+    if fetch_laya_health(&state.client, &state.laya_endpoint)
+        .await
+        .is_ok()
+    {
         return Ok(());
     }
     if !is_loopback_endpoint(&state.laya_endpoint) {
         return Err("automatic Laya start is allowed only for the loopback endpoint".into());
     }
 
-    let mut child_guard = state.laya_child.lock().map_err(|_| "Laya supervisor lock is poisoned")?;
+    let mut child_guard = state
+        .laya_child
+        .lock()
+        .map_err(|_| "Laya supervisor lock is poisoned")?;
     if let Some(child) = child_guard.as_mut() {
         match child.try_wait() {
             Ok(None) => return Ok(()),
@@ -205,10 +234,15 @@ async fn ensure_laya(state: State<'_, AppState>) -> Result<(), String> {
     let laya_root = laya_root(&state.workspace_root);
     let python = laya_root.join(".venv").join("Scripts").join("python.exe");
     if !python.is_file() {
-        return Err(format!("Laya Python runtime is missing: {}", python.display()));
+        return Err(format!(
+            "Laya Python runtime is missing: {}",
+            python.display()
+        ));
     }
-    let stdout = File::create(state.runtime.log_root.join("laya-desktop.stdout.log")).map_err(error_text)?;
-    let stderr = File::create(state.runtime.log_root.join("laya-desktop.stderr.log")).map_err(error_text)?;
+    let stdout =
+        File::create(state.runtime.log_root.join("laya-desktop.stdout.log")).map_err(error_text)?;
+    let stderr =
+        File::create(state.runtime.log_root.join("laya-desktop.stderr.log")).map_err(error_text)?;
     let child = Command::new(&python)
         .args(["-m", "laya.serve"])
         .current_dir(&laya_root)
@@ -227,6 +261,10 @@ async fn ensure_laya(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 async fn ensure_watcher(state: State<'_, AppState>) -> Result<(), String> {
+    ensure_watcher_inner(state.inner()).await
+}
+
+async fn ensure_watcher_inner(state: &AppState) -> Result<(), String> {
     let owned_child_exited = {
         let mut child_guard = state
             .watcher_child
@@ -293,6 +331,10 @@ async fn ensure_watcher(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 async fn ensure_prediction_testnet(state: State<'_, AppState>) -> Result<(), String> {
+    ensure_prediction_testnet_inner(state.inner()).await
+}
+
+async fn ensure_prediction_testnet_inner(state: &AppState) -> Result<(), String> {
     {
         let mut child_guard = state
             .testnet_child
@@ -308,21 +350,36 @@ async fn ensure_prediction_testnet(state: State<'_, AppState>) -> Result<(), Str
 
     let observed_at = now_ms()?;
     let prior = read_prediction_testnet_status(&state.runtime.state_root);
-    if matches!(prior.phase.as_str(), "ROUND_TRIP_COMPLETE" | "FAILED_REVIEW_REQUIRED") {
+    if matches!(
+        prior.phase.as_str(),
+        "ROUND_TRIP_COMPLETE" | "FAILED_REVIEW_REQUIRED"
+    ) {
         return Ok(());
     }
-    let status_path = state.runtime.state_root.join("prediction-testnet-demo-status.json");
+    let status_path = state
+        .runtime
+        .state_root
+        .join("prediction-testnet-demo-status.json");
     let fresh = fs::metadata(&status_path)
         .ok()
         .and_then(|metadata| metadata.modified().ok())
         .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-        .map(|value| observed_at.saturating_sub(value.as_millis() as u64) <= TESTNET_RUNNER_FRESH_MS)
+        .map(|value| {
+            observed_at.saturating_sub(value.as_millis() as u64) <= TESTNET_RUNNER_FRESH_MS
+        })
         .unwrap_or(false);
-    if fresh && matches!(prior.phase.as_str(), "ARMED_WAITING_CANDIDATE" | "EXECUTING") {
+    if fresh
+        && matches!(
+            prior.phase.as_str(),
+            "ARMED_WAITING_CANDIDATE" | "EXECUTING"
+        )
+    {
         return Ok(());
     }
     if prior.phase == "EXECUTING" {
-        return Err("stale EXECUTING status requires manual reconciliation; runner will not restart".into());
+        return Err(
+            "stale EXECUTING status requires manual reconciliation; runner will not restart".into(),
+        );
     }
 
     let runner = state
@@ -331,7 +388,10 @@ async fn ensure_prediction_testnet(state: State<'_, AppState>) -> Result<(), Str
         .join("overlay")
         .join("prospective-testnet-demo.ts");
     if !runner.is_file() {
-        return Err(format!("Prediction Testnet runner is missing: {}", runner.display()));
+        return Err(format!(
+            "Prediction Testnet runner is missing: {}",
+            runner.display()
+        ));
     }
     let env_file = state.workspace_root.join(".env");
     if !env_file.is_file() {
@@ -376,7 +436,11 @@ async fn system_status(state: State<'_, AppState>) -> Result<SystemStatus, Strin
     let observed_at = now_ms()?;
     let laya = match fetch_laya_health(&state.client, &state.laya_endpoint).await {
         Ok(health) if health.status == "ok" => LayaStatus {
-            phase: if health.loaded.is_empty() { "SERVICE_READY_MODEL_COLD" } else { "MODEL_READY" },
+            phase: if health.loaded.is_empty() {
+                "SERVICE_READY_MODEL_COLD"
+            } else {
+                "MODEL_READY"
+            },
             endpoint: state.laya_endpoint.clone(),
             loaded_models: health.loaded,
             device: health.device,
@@ -390,11 +454,23 @@ async fn system_status(state: State<'_, AppState>) -> Result<SystemStatus, Strin
             detail: Some(format!("unexpected health status: {}", health.status)),
         },
         Err(detail) => {
-            let starting = state.laya_child.lock().ok().and_then(|mut guard| {
-                guard.as_mut().and_then(|child| child.try_wait().ok()).map(|status| status.is_none())
-            }).unwrap_or(false);
+            let starting = state
+                .laya_child
+                .lock()
+                .ok()
+                .and_then(|mut guard| {
+                    guard
+                        .as_mut()
+                        .and_then(|child| child.try_wait().ok())
+                        .map(|status| status.is_none())
+                })
+                .unwrap_or(false);
             LayaStatus {
-                phase: if starting { "SERVICE_STARTING" } else { "OFFLINE" },
+                phase: if starting {
+                    "SERVICE_STARTING"
+                } else {
+                    "OFFLINE"
+                },
                 endpoint: state.laya_endpoint.clone(),
                 loaded_models: Vec::new(),
                 device: None,
@@ -463,6 +539,14 @@ async fn system_status(state: State<'_, AppState>) -> Result<SystemStatus, Strin
         prediction_testnet,
         laya,
         laya_review: read_laya_review_status(&state.runtime.evidence_root),
+        supervisor: SupervisorStatus {
+            resident: true,
+            started_at: state.started_at,
+            cadence_ms: SUPERVISOR_CADENCE_MS,
+            cloud_ai_required: false,
+            laya_local_only: true,
+            testnet_auto_arm: false,
+        },
         authority: AuthorityStatus {
             execution_enabled: testnet_demo_armed,
             testnet_demo_armed,
@@ -492,7 +576,9 @@ fn read_watcher_status(evidence_root: &Path, observed_at: u64) -> WatcherStatus 
     let latest = match fs::read_dir(&scan_root) {
         Ok(entries) => entries
             .filter_map(Result::ok)
-            .filter(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("json"))
+            .filter(|entry| {
+                entry.path().extension().and_then(|value| value.to_str()) == Some("json")
+            })
             .filter_map(|entry| {
                 let modified = entry.metadata().ok()?.modified().ok()?;
                 Some((modified, entry.path()))
@@ -503,9 +589,17 @@ fn read_watcher_status(evidence_root: &Path, observed_at: u64) -> WatcherStatus 
     let Some((modified, path)) = latest else {
         return empty_watcher("NEVER_RUN");
     };
-    let parsed: Value = match fs::read_to_string(&path).ok().and_then(|body| serde_json::from_str(&body).ok()) {
+    let parsed: Value = match fs::read_to_string(&path)
+        .ok()
+        .and_then(|body| serde_json::from_str(&body).ok())
+    {
         Some(value) => value,
-        None => return WatcherStatus { latest_scan_path: Some(display_path(&path)), ..empty_watcher("FAILED") },
+        None => {
+            return WatcherStatus {
+                latest_scan_path: Some(display_path(&path)),
+                ..empty_watcher("FAILED")
+            }
+        }
     };
     let recorded_at = parsed.get("recordedAt").and_then(Value::as_u64);
     let modified_at = modified
@@ -541,7 +635,9 @@ fn read_hourly_watcher_status(evidence_root: &Path, observed_at: u64) -> HourlyW
     let latest = match fs::read_dir(&scan_root) {
         Ok(entries) => entries
             .filter_map(Result::ok)
-            .filter(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("json"))
+            .filter(|entry| {
+                entry.path().extension().and_then(|value| value.to_str()) == Some("json")
+            })
             .filter_map(|entry| {
                 let modified = entry.metadata().ok()?.modified().ok()?;
                 Some((modified, entry.path()))
@@ -549,15 +645,30 @@ fn read_hourly_watcher_status(evidence_root: &Path, observed_at: u64) -> HourlyW
             .max_by_key(|(modified, _)| *modified),
         Err(_) => None,
     };
-    let Some((modified, path)) = latest else { return empty_hourly_watcher("NEVER_RUN"); };
-    let parsed: Value = match fs::read_to_string(&path).ok().and_then(|body| serde_json::from_str(&body).ok()) {
+    let Some((modified, path)) = latest else {
+        return empty_hourly_watcher("NEVER_RUN");
+    };
+    let parsed: Value = match fs::read_to_string(&path)
+        .ok()
+        .and_then(|body| serde_json::from_str(&body).ok())
+    {
         Some(value) => value,
-        None => return HourlyWatcherStatus { latest_scan_path: Some(display_path(&path)), ..empty_hourly_watcher("FAILED") },
+        None => {
+            return HourlyWatcherStatus {
+                latest_scan_path: Some(display_path(&path)),
+                ..empty_hourly_watcher("FAILED")
+            }
+        }
     };
     let recorded_at = parsed.get("recordedAt").and_then(Value::as_u64);
-    let modified_at = modified.duration_since(UNIX_EPOCH).map(|value| value.as_millis() as u64).ok();
+    let modified_at = modified
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_millis() as u64)
+        .ok();
     let phase = match (recorded_at, modified_at) {
-        (Some(_), Some(timestamp)) if observed_at.saturating_sub(timestamp) <= WATCHER_FRESH_MS => "RUNNING",
+        (Some(_), Some(timestamp)) if observed_at.saturating_sub(timestamp) <= WATCHER_FRESH_MS => {
+            "RUNNING"
+        }
         (Some(_), Some(_)) => "STALE",
         _ => "FAILED",
     };
@@ -575,7 +686,13 @@ fn read_hourly_watcher_status(evidence_root: &Path, observed_at: u64) -> HourlyW
         monitored_assets: parsed
             .get("monitoredAssets")
             .and_then(Value::as_array)
-            .map(|values| values.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
             .unwrap_or_default(),
         discovered_episodes: json_u64(&parsed, "discoveredEpisodes"),
         active_episodes: json_u64(&parsed, "activeEpisodes"),
@@ -634,7 +751,11 @@ fn read_latest_candidate(evidence_root: &Path) -> Option<CandidateStatus> {
         read_latest_hourly_candidate(evidence_root),
     ) {
         (Some(price), Some(hourly)) => {
-            if hourly.candidate_t0 > price.candidate_t0 { Some(hourly) } else { Some(price) }
+            if hourly.candidate_t0 > price.candidate_t0 {
+                Some(hourly)
+            } else {
+                Some(price)
+            }
         }
         (Some(candidate), None) | (None, Some(candidate)) => Some(candidate),
         (None, None) => None,
@@ -659,7 +780,11 @@ fn read_latest_price_target_candidate(evidence_root: &Path) -> Option<CandidateS
         }
         let candidate = parsed.get("candidate")?;
         let candidate_t0 = candidate.get("candidateT0").and_then(Value::as_u64)?;
-        if selected.as_ref().map(|(current, _)| candidate_t0 > *current).unwrap_or(true) {
+        if selected
+            .as_ref()
+            .map(|(current, _)| candidate_t0 > *current)
+            .unwrap_or(true)
+        {
             selected = Some((candidate_t0, parsed));
         }
     }
@@ -702,11 +827,19 @@ fn read_latest_hourly_candidate(evidence_root: &Path) -> Option<CandidateStatus>
         let Some(parsed) = fs::read_to_string(entry.path())
             .ok()
             .and_then(|body| serde_json::from_str::<Value>(&body).ok())
-        else { continue; };
-        if parsed.get("status").and_then(Value::as_str) != Some("QUALIFIED") { continue; }
+        else {
+            continue;
+        };
+        if parsed.get("status").and_then(Value::as_str) != Some("QUALIFIED") {
+            continue;
+        }
         let candidate = parsed.get("candidate")?;
         let candidate_t0 = candidate.get("candidateT0").and_then(Value::as_u64)?;
-        if selected.as_ref().map(|(current, _)| candidate_t0 > *current).unwrap_or(true) {
+        if selected
+            .as_ref()
+            .map(|(current, _)| candidate_t0 > *current)
+            .unwrap_or(true)
+        {
             selected = Some((candidate_t0, candidate.clone()));
         }
     }
@@ -758,7 +891,10 @@ fn read_laya_review_status(evidence_root: &Path) -> LayaReviewStatus {
         None => {
             return empty_laya_review(
                 "FAILED",
-                Some(format!("review artifact is unreadable: {}", display_path(&path))),
+                Some(format!(
+                    "review artifact is unreadable: {}",
+                    display_path(&path)
+                )),
             )
         }
     };
@@ -836,9 +972,18 @@ fn runtime_paths(app: &AppHandle, workspace_root: &Path) -> Result<RuntimePaths,
             return Ok(packaged_paths(data_root));
         }
     }
-    if cfg!(debug_assertions) {
+    if workspace_root
+        .join("src")
+        .join("overlay")
+        .join("price-target-collector.ts")
+        .is_file()
+    {
         return Ok(RuntimePaths {
-            mode: "DEVELOPMENT",
+            mode: if cfg!(debug_assertions) {
+                "DEVELOPMENT"
+            } else {
+                "LOCAL_WORKSPACE"
+            },
             data_root: workspace_root.to_path_buf(),
             evidence_root: workspace_root.join("work"),
             state_root: workspace_root.join(".runtime"),
@@ -862,14 +1007,23 @@ fn packaged_paths(data_root: PathBuf) -> RuntimePaths {
 fn workspace_root() -> PathBuf {
     let path = env::var_os("PREPERP_WORKSPACE_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join(".."));
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+        });
     path.canonicalize().unwrap_or(path)
 }
 
 fn laya_root(workspace_root: &Path) -> PathBuf {
-    env::var_os("LAYA_HOME").map(PathBuf::from).unwrap_or_else(|| {
-        workspace_root.parent().unwrap_or(workspace_root).join("laya-sidecar")
-    })
+    env::var_os("LAYA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            workspace_root
+                .parent()
+                .unwrap_or(workspace_root)
+                .join("laya-sidecar")
+        })
 }
 
 fn is_loopback_endpoint(endpoint: &str) -> bool {
@@ -892,15 +1046,127 @@ fn error_text(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
+fn start_runtime_supervisor(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut first_cycle = true;
+        loop {
+            let state = app.state::<AppState>();
+            let log_root = state.runtime.log_root.clone();
+            let laya = ensure_laya_inner(state.inner()).await;
+            let watcher = ensure_watcher_inner(state.inner()).await;
+            drop(state);
+
+            if first_cycle || laya.is_err() || watcher.is_err() {
+                append_supervisor_log(
+                    &log_root,
+                    &format!(
+                        "laya={} watcher={} testnet_auto_arm=false",
+                        result_label(&laya),
+                        result_label(&watcher)
+                    ),
+                );
+            }
+            first_cycle = false;
+            tokio::time::sleep(Duration::from_millis(SUPERVISOR_CADENCE_MS)).await;
+        }
+    });
+}
+
+fn result_label(result: &Result<(), String>) -> String {
+    match result {
+        Ok(()) => "ok".into(),
+        Err(error) => format!("error:{error}"),
+    }
+}
+
+fn append_supervisor_log(log_root: &Path, message: &str) {
+    if fs::create_dir_all(log_root).is_err() {
+        return;
+    }
+    let Ok(timestamp) = now_ms() else {
+        return;
+    };
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_root.join("desktop-supervisor.log"))
+    {
+        let _ = writeln!(file, "{timestamp} {message}");
+    }
+}
+
+fn stop_owned_children(state: &AppState) {
+    stop_owned_child(&state.testnet_child);
+    stop_owned_child(&state.watcher_child);
+    stop_owned_child(&state.laya_child);
+}
+
+fn stop_owned_child(slot: &Mutex<Option<Child>>) {
+    let Ok(mut guard) = slot.lock() else {
+        return;
+    };
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "打开 PrePerp 控制台", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出并停止本地采集", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut tray = TrayIconBuilder::with_id("preperp-runtime")
+        .tooltip("PrePerp 本地量化运行时")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
+            "quit" => {
+                let state = app.state::<AppState>();
+                stop_owned_children(state.inner());
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--background"]),
+        ))
         .setup(|app| {
             let workspace_root = workspace_root();
             let runtime = runtime_paths(&app.handle(), &workspace_root)?;
             fs::create_dir_all(&runtime.state_root).map_err(error_text)?;
             fs::create_dir_all(&runtime.log_root).map_err(error_text)?;
-            let laya_endpoint = env::var("LAYA_BASE_URL").unwrap_or_else(|_| LAYA_DEFAULT_ENDPOINT.into());
+            let laya_endpoint =
+                env::var("LAYA_BASE_URL").unwrap_or_else(|_| LAYA_DEFAULT_ENDPOINT.into());
             app.manage(AppState {
                 runtime,
                 workspace_root,
@@ -909,8 +1175,22 @@ pub fn run() {
                 watcher_child: Mutex::new(None),
                 testnet_child: Mutex::new(None),
                 client: reqwest::Client::new(),
+                started_at: now_ms()?,
             });
+            setup_tray(app).map_err(error_text)?;
+            if env::args().any(|argument| argument == "--background") {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.hide().map_err(error_text)?;
+                }
+            }
+            start_runtime_supervisor(app.handle().clone());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             ensure_laya,
