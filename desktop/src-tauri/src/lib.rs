@@ -26,7 +26,6 @@ struct AppState {
     laya_endpoint: String,
     laya_child: Mutex<Option<Child>>,
     watcher_child: Mutex<Option<Child>>,
-    hourly_watcher_child: Mutex<Option<Child>>,
     testnet_child: Mutex<Option<Child>>,
     client: reqwest::Client,
     started_at: u64,
@@ -263,8 +262,7 @@ async fn ensure_laya_inner(state: &AppState) -> Result<(), String> {
 
 #[tauri::command]
 async fn ensure_watcher(state: State<'_, AppState>) -> Result<(), String> {
-    ensure_watcher_inner(state.inner()).await?;
-    ensure_hourly_watcher_inner(state.inner()).await
+    ensure_watcher_inner(state.inner()).await
 }
 
 async fn ensure_watcher_inner(state: &AppState) -> Result<(), String> {
@@ -328,81 +326,6 @@ async fn ensure_watcher_inner(state: &AppState) -> Result<(), String> {
         .watcher_child
         .lock()
         .map_err(|_| "watcher supervisor lock is poisoned")?;
-    *child_guard = Some(child);
-    Ok(())
-}
-
-async fn ensure_hourly_watcher_inner(state: &AppState) -> Result<(), String> {
-    let owned_child_exited = {
-        let mut child_guard = state
-            .hourly_watcher_child
-            .lock()
-            .map_err(|_| "hourly watcher supervisor lock is poisoned")?;
-        if let Some(child) = child_guard.as_mut() {
-            match child.try_wait() {
-                Ok(None) => return Ok(()),
-                Ok(Some(_)) | Err(_) => {
-                    *child_guard = None;
-                    true
-                }
-            }
-        } else {
-            false
-        }
-    };
-
-    let observed_at = now_ms()?;
-    if !owned_child_exited
-        && read_hourly_watcher_status(&state.runtime.evidence_root, observed_at).phase == "RUNNING"
-    {
-        return Ok(());
-    }
-
-    let collector = state
-        .workspace_root
-        .join("src")
-        .join("overlay")
-        .join("hourly-up-down-collector.ts");
-    if !collector.is_file() {
-        return Err(format!(
-            "hourly watcher entry point is missing: {}",
-            collector.display()
-        ));
-    }
-    fs::create_dir_all(&state.runtime.log_root).map_err(error_text)?;
-    let stdout = File::create(
-        state
-            .runtime
-            .log_root
-            .join("hourly-up-down-watch.stdout.log"),
-    )
-    .map_err(error_text)?;
-    let stderr = File::create(
-        state
-            .runtime
-            .log_root
-            .join("hourly-up-down-watch.stderr.log"),
-    )
-    .map_err(error_text)?;
-    let mut command = Command::new("node");
-    command
-        .args([
-            "--experimental-strip-types",
-            "src/overlay/hourly-up-down-collector.ts",
-            "--watch",
-        ])
-        .current_dir(&state.workspace_root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
-    if state.runtime.mode == "PACKAGED" {
-        command.env("PREPERP_DATA_ROOT", &state.runtime.data_root);
-    }
-    let child = command.spawn().map_err(error_text)?;
-    let mut child_guard = state
-        .hourly_watcher_child
-        .lock()
-        .map_err(|_| "hourly watcher supervisor lock is poisoned")?;
     *child_guard = Some(child);
     Ok(())
 }
@@ -573,17 +496,7 @@ async fn system_status(state: State<'_, AppState>) -> Result<SystemStatus, Strin
         watcher.phase = "RUNNING";
     }
     let mut hourly_watcher = read_hourly_watcher_status(&state.runtime.evidence_root, observed_at);
-    hourly_watcher.process_alive = state
-        .hourly_watcher_child
-        .lock()
-        .ok()
-        .and_then(|mut guard| {
-            guard
-                .as_mut()
-                .and_then(|child| child.try_wait().ok())
-                .map(|status| status.is_none())
-        })
-        .unwrap_or(false);
+    hourly_watcher.process_alive = watcher.process_alive;
     if hourly_watcher.process_alive {
         hourly_watcher.phase = "RUNNING";
     }
@@ -1154,17 +1067,15 @@ fn start_runtime_supervisor(app: AppHandle) {
             let log_root = state.runtime.log_root.clone();
             let laya = ensure_laya_inner(state.inner()).await;
             let watcher = ensure_watcher_inner(state.inner()).await;
-            let hourly_watcher = ensure_hourly_watcher_inner(state.inner()).await;
             drop(state);
 
-            if first_cycle || laya.is_err() || watcher.is_err() || hourly_watcher.is_err() {
+            if first_cycle || laya.is_err() || watcher.is_err() {
                 append_supervisor_log(
                     &log_root,
                     &format!(
-                        "laya={} watcher={} hourly_watcher={} testnet_auto_arm=false",
+                        "laya={} watcher={} testnet_auto_arm=false",
                         result_label(&laya),
-                        result_label(&watcher),
-                        result_label(&hourly_watcher)
+                        result_label(&watcher)
                     ),
                 );
             }
@@ -1199,7 +1110,6 @@ fn append_supervisor_log(log_root: &Path, message: &str) {
 
 fn stop_owned_children(state: &AppState) {
     stop_owned_child(&state.testnet_child);
-    stop_owned_child(&state.hourly_watcher_child);
     stop_owned_child(&state.watcher_child);
     stop_owned_child(&state.laya_child);
 }
@@ -1279,7 +1189,6 @@ pub fn run() {
                 laya_endpoint,
                 laya_child: Mutex::new(None),
                 watcher_child: Mutex::new(None),
-                hourly_watcher_child: Mutex::new(None),
                 testnet_child: Mutex::new(None),
                 client: reqwest::Client::new(),
                 started_at: now_ms()?,
