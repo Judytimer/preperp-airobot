@@ -3,9 +3,9 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  BinanceUsdsTestnetMarketFeed,
-  BinanceUsdsTestnetVenue,
-  OfficialBinanceUsdsTestnetTransport
+  BinanceUsdsMarketFeed,
+  BinanceUsdsVenue,
+  OfficialBinanceUsdsTransport
 } from "./binance-testnet.ts";
 import { PerpBot } from "./bot.ts";
 import type { ExecutionEventHandler, ExecutionVenue } from "./exchange.ts";
@@ -185,7 +185,7 @@ export function validateFlatPreflight(
   if (snapshot.position.side !== "FLAT" || snapshot.position.qty !== 0) failures.push("venue Position is not FLAT");
   if (snapshot.openOrders.length !== 0) failures.push("venue openOrders is not zero");
   if (bot.isRecoveryRequired()) failures.push("recoveryRequired is true");
-  if (failures.length > 0) throw new Error(`Testnet validation preflight failed: ${failures.join("; ")}`);
+  if (failures.length > 0) throw new Error(`execution validation preflight failed: ${failures.join("; ")}`);
   return reconciliation;
 }
 
@@ -352,15 +352,16 @@ function requiredEnv(name: string): string {
 async function main(): Promise<void> {
   const apiKey = requiredEnv("BINANCE_TESTNET_API_KEY");
   const apiSecret = requiredEnv("BINANCE_TESTNET_API_SECRET");
-  const transport = new OfficialBinanceUsdsTestnetTransport(apiKey, apiSecret);
-  const venue = new BinanceUsdsTestnetVenue({
+  const transport = new OfficialBinanceUsdsTransport({ apiKey, apiSecret, environment: "TESTNET" });
+  const venue = new BinanceUsdsVenue({
     canonicalSymbol: CANONICAL_SYMBOL,
     venueSymbol: VENUE_SYMBOL,
     transport
   });
-  const feed = new BinanceUsdsTestnetMarketFeed({
+  const feed = new BinanceUsdsMarketFeed({
     canonicalSymbol: CANONICAL_SYMBOL,
-    venueSymbol: VENUE_SYMBOL
+    venueSymbol: VENUE_SYMBOL,
+    environment: "TESTNET"
   });
   try {
     const report = await runAuthenticatedTestnetPerpValidation({

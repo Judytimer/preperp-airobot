@@ -3,9 +3,9 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  BinanceUsdsTestnetMarketFeed,
-  BinanceUsdsTestnetVenue,
-  OfficialBinanceUsdsTestnetTransport
+  BinanceUsdsMarketFeed,
+  BinanceUsdsVenue,
+  OfficialBinanceUsdsTransport
 } from "./binance-testnet.ts";
 import { PerpBot } from "./bot.ts";
 import { ObservedExecutionVenue } from "./closure-smoke.ts";
@@ -56,8 +56,8 @@ export class MovingAverageTestnetRoundTripSignal implements PerpSignalSource {
 async function main(): Promise<void> {
   const apiKey = requiredEnv("BINANCE_TESTNET_API_KEY");
   const apiSecret = requiredEnv("BINANCE_TESTNET_API_SECRET");
-  const transport = new OfficialBinanceUsdsTestnetTransport(apiKey, apiSecret);
-  const venue = new BinanceUsdsTestnetVenue({ canonicalSymbol: CANONICAL_SYMBOL, venueSymbol: VENUE_SYMBOL, transport });
+  const transport = new OfficialBinanceUsdsTransport({ apiKey, apiSecret, environment: "TESTNET" });
+  const venue = new BinanceUsdsVenue({ canonicalSymbol: CANONICAL_SYMBOL, venueSymbol: VENUE_SYMBOL, transport });
   const signal = new MovingAverageTestnetRoundTripSignal(3, 6);
   let bot: PerpBot | undefined;
   let openedPosition: Position | undefined;
@@ -84,7 +84,7 @@ async function main(): Promise<void> {
     venue: observedVenue,
     logger: console.log
   });
-  const feed = new BinanceUsdsTestnetMarketFeed({ canonicalSymbol: CANONICAL_SYMBOL, venueSymbol: VENUE_SYMBOL });
+  const feed = new BinanceUsdsMarketFeed({ canonicalSymbol: CANONICAL_SYMBOL, venueSymbol: VENUE_SYMBOL, environment: "TESTNET" });
   let venueStarted = false;
   let feedStarted = false;
   let marketTicks = 0;
@@ -142,10 +142,10 @@ async function main(): Promise<void> {
 
 async function waitForFlatReconciliation(
   bot: PerpBot,
-  venue: Pick<BinanceUsdsTestnetVenue, "snapshot">
-): Promise<{ snapshot: Awaited<ReturnType<BinanceUsdsTestnetVenue["snapshot"]>>; reconciliation: ReturnType<PerpBot["reconcile"]> }> {
+  venue: Pick<BinanceUsdsVenue, "snapshot">
+): Promise<{ snapshot: Awaited<ReturnType<BinanceUsdsVenue["snapshot"]>>; reconciliation: ReturnType<PerpBot["reconcile"]> }> {
   const deadline = Date.now() + FINAL_RECONCILIATION_TIMEOUT_MS;
-  let latestSnapshot: Awaited<ReturnType<BinanceUsdsTestnetVenue["snapshot"]>> | undefined;
+  let latestSnapshot: Awaited<ReturnType<BinanceUsdsVenue["snapshot"]>> | undefined;
   let latestReconciliation: ReturnType<PerpBot["reconcile"]> | undefined;
   let lastSnapshotError: unknown;
   while (Date.now() <= deadline) {

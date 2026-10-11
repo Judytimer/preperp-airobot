@@ -61,7 +61,7 @@ Liquidation × Late Fill 实验暴露的核心 invariant：
 
 ## 6. Command 完成不等于 ACK `[IMPLEMENTED]`
 
-`submit()` 返回只表示命令调用完成。ACK / Fill / CancelAck 必须通过独立 execution event 推进状态。
+`submit()` 返回只表示命令调用完成。ACK / Fill / ORDER_TERMINAL 必须通过独立 execution event 推进状态；终态覆盖 `CANCELED / EXPIRED / EXPIRED_IN_MATCH / REJECTED`。
 
 ## 7. Ambiguous Submit 不能靠通用 Retry `[PARTIAL]`
 
@@ -73,9 +73,9 @@ submit
 → 重复订单
 ```
 
-当前已实现 signed order submit 关闭普通自动重试，并在越过 venue boundary 前持久化 clientOrderId。
+当前已实现 signed order submit 关闭普通自动重试，并在越过 venue boundary 前持久化 clientOrderId。Binance connector 会用同一个 clientOrderId 查询并观察 user stream；真钱微额 runner 在仍不确定时继续隔离观察，并在发现敞口后走权威 snapshot + reduce-only emergency flatten。
 
-但运行期 `submit timeout → authoritative evidence query → reconciliation / recovery → safe resume` 还没有完整自动化。因此“必须依赖交易所证据收敛”是设计边界，不应表述成 Core 已经自动完成的流程。
+通用 Core 尚未把该过程抽象成可恢复的统一状态机，因此“必须依赖交易所证据收敛”仍是全局设计边界；目前完整自动收敛只属于受限的 Mainnet Micro v1 路径。
 
 ## 8. clientOrderId 由 Core 提前拥有 `[IMPLEMENTED]`
 

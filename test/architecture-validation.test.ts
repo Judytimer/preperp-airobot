@@ -5,7 +5,7 @@ import { PerpBot } from "../src/bot.ts";
 import type { ExecutionEventHandler, ExecutionVenue } from "../src/exchange.ts";
 import { InFlightOrderTracker } from "../src/order-tracker.ts";
 import type { BotCheckpoint, BotStateStore } from "../src/state-store.ts";
-import type { CancelAck, Fill, OrderAck, SubmitOrderCommand, Tick } from "../src/types.ts";
+import type { Fill, OrderAck, OrderTerminal, SubmitOrderCommand, Tick } from "../src/types.ts";
 
 test("persists a client-owned SUBMITTED identity before crossing the venue boundary", async () => {
   const store = new MemoryStateStore();
@@ -19,7 +19,8 @@ test("persists a client-owned SUBMITTED identity before crossing the venue bound
       originalQty: 0.01,
       filledQty: 0,
       remainingQty: 0.01,
-      status: "SUBMITTED"
+      status: "SUBMITTED",
+      cancelRequested: false
     });
   });
   const bot = await PerpBot.create(config(venue, store));
@@ -46,24 +47,27 @@ test("restarts fail-closed from SUBMITTED without an exchange identity", async (
   assert.deepEqual(store.get(), checkpoint);
 });
 
-test("documents that a late ACK after SUBMITTED cancel intent is rejected without clearing cancel intent", () => {
+test("late ACK binds identity without clearing an existing cancel intent", () => {
   const tracker = submittedTracker();
 
-  assert.equal(tracker.requestCancelOpenOrders()[0]?.status, "CANCEL_REQUESTED");
-  assert.throws(() => tracker.processAck(orderAck()), /not awaiting acknowledgment/);
-  assert.equal(tracker.get("CLIENT-1")?.status, "CANCEL_REQUESTED");
-  tracker.processCancelAck(cancelAck());
+  assert.equal(tracker.requestCancelOpenOrders()[0]?.cancelRequested, true);
+  tracker.processAck(orderAck());
+  assert.equal(tracker.get("CLIENT-1")?.status, "ACKED");
+  assert.equal(tracker.get("CLIENT-1")?.cancelRequested, true);
+  tracker.processTerminal(terminal());
   assert.equal(tracker.get("CLIENT-1")?.status, "CANCELED");
 });
 
-test("documents that a fill during cancel intent makes the following CANCEL_ACK throw", () => {
+test("fill during cancel intent preserves the intent and accepts the later terminal event", () => {
   const tracker = submittedTracker();
   tracker.processAck(orderAck());
   tracker.requestCancelOpenOrders();
 
   assert.equal(tracker.processFill(partialFill()).accepted, true);
   assert.equal(tracker.get("CLIENT-1")?.status, "PARTIALLY_FILLED");
-  assert.throws(() => tracker.processCancelAck(cancelAck()), /not awaiting cancel confirmation/);
+  assert.equal(tracker.get("CLIENT-1")?.cancelRequested, true);
+  tracker.processTerminal(terminal());
+  assert.equal(tracker.get("CLIENT-1")?.status, "CANCELED");
 });
 
 class InspectingVenue implements ExecutionVenue {
@@ -180,7 +184,7 @@ function partialFill(): Fill {
   };
 }
 
-function cancelAck(): CancelAck {
+function terminal(): OrderTerminal {
   return {
     clientOrderId: "CLIENT-1",
     exchangeOrderId: "VENUE-1",

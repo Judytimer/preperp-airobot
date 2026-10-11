@@ -26,15 +26,21 @@
     "laya:review:next": "node --experimental-strip-types src/overlay/laya-review-smoke.ts",
     "smoke:prediction:prospective": "node --experimental-strip-types src/overlay/prospective-paper-smoke.ts",
     "smoke:prediction:testnet": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/overlay/prospective-testnet-demo.ts",
+    "mainnet:micro:prepare": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-mainnet-clock-bootstrap.ts src/mainnet-micro.ts prepare",
+    "mainnet:micro:execute": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-mainnet-clock-bootstrap.ts src/mainnet-micro.ts execute",
     "desktop:install": "npm --prefix desktop install",
     "desktop:dev": "npm --prefix desktop run tauri:dev",
     "desktop:frontend": "npm --prefix desktop run build",
     "desktop:build": "npm --prefix desktop run tauri:build",
     "desktop:check": "npm --prefix desktop run build && cargo check --manifest-path desktop/src-tauri/Cargo.toml",
     "replay": "node --experimental-strip-types src/replay-index.ts",
+    "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
     "@binance/derivatives-trading-usds-futures": "^38.1.1"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
   }
 }

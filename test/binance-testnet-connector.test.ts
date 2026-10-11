@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BinanceUsdsTestnetVenue,
+  BinanceUsdsVenue,
   mapBinanceOrderUpdate,
   parseSymbolRules,
   validateMarketOrder
@@ -10,7 +10,7 @@ import {
 import type {
   BinanceOrderTradeUpdate,
   BinanceSymbolRules,
-  BinanceTestnetTransport
+  BinanceUsdsTransport
 } from "../src/binance-testnet.ts";
 import type { ExecutionEvent, OrderRequest } from "../src/types.ts";
 
@@ -32,7 +32,34 @@ test("maps Binance NEW, TRADE, and CANCELED updates into canonical execution fac
       ts: 3
     }
   });
-  assert.equal(mapBinanceOrderUpdate(update("CANCELED", "CANCELED"), "BTC-PERP", "BTCUSDT", request)?.type, "CANCEL_ACK");
+  assert.equal(mapBinanceOrderUpdate(update("CANCELED", "CANCELED"), "BTC-PERP", "BTCUSDT", request)?.type, "ORDER_TERMINAL");
+});
+
+test("maps terminal families and preserves fee currency and realized PnL", () => {
+  const expired = update("EXPIRED", "EXPIRED");
+  expired.o!.er = "9";
+  assert.deepEqual(mapBinanceOrderUpdate(expired, "BTC-PERP", "BTCUSDT", order()), {
+    type: "ORDER_TERMINAL",
+    terminal: {
+      clientOrderId: "BTC-PERP-1",
+      exchangeOrderId: "42",
+      status: "EXPIRED",
+      reason: "9",
+      ts: 3
+    }
+  });
+
+  const trade = update("TRADE", "EXPIRED_IN_MATCH");
+  trade.o!.N = "BNB";
+  trade.o!.rp = "-0.25";
+  trade.o!.er = "1";
+  const event = mapBinanceOrderUpdate(trade, "BTC-PERP", "BTCUSDT", order());
+  assert.equal(event?.type, "FILL");
+  if (event?.type !== "FILL") throw new Error("expected fill");
+  assert.equal(event.fill.feeAsset, "BNB");
+  assert.equal(event.fill.venueRealizedPnl, -0.25);
+  assert.equal(event.fill.terminalStatus, "EXPIRED_IN_MATCH");
+  assert.equal(event.fill.terminalReason, "1");
 });
 
 test("validates Binance market lot size and minimum notional without changing the core intent", () => {
@@ -42,7 +69,7 @@ test("validates Binance market lot size and minimum notional without changing th
   assert.throws(() => validateMarketOrder({ ...order(), qty: 0.001 }, rules), /below Binance minimum/);
 });
 
-test("parses the symbol filters used by the Testnet boundary", () => {
+test("parses the symbol filters used by the USD-M boundary", () => {
   assert.deepEqual(parseSymbolRules({
     symbols: [{
       symbol: "BTCUSDT",
@@ -58,7 +85,7 @@ test("parses the symbol filters used by the Testnet boundary", () => {
 
 test("uses the external user stream as the only ACK and Fill fact path", async () => {
   const transport = new FakeTransport();
-  const venue = new BinanceUsdsTestnetVenue({
+  const venue = new BinanceUsdsVenue({
     canonicalSymbol: "BTC-PERP",
     venueSymbol: "BTCUSDT",
     transport
@@ -75,9 +102,36 @@ test("uses the external user stream as the only ACK and Fill fact path", async (
   assert.deepEqual(events.map((event) => event.type), ["ORDER_ACK", "FILL"]);
 });
 
+test("serializes interleaved updates for multiple live orders without cross-wiring identities", async () => {
+  const transport = new FakeTransport();
+  const venue = new BinanceUsdsVenue({
+    canonicalSymbol: "BTC-PERP",
+    venueSymbol: "BTCUSDT",
+    transport
+  });
+  const events: ExecutionEvent[] = [];
+  venue.onExecutionEvent((event) => events.push(event));
+  await venue.start();
+  await venue.submit({ clientOrderId: "BTC-PERP-1", request: order() });
+  await venue.submit({ clientOrderId: "BTC-PERP-2", request: { ...order(), qty: 0.02 } });
+
+  await Promise.all([
+    transport.emit(update("NEW", "NEW", "BTC-PERP-1", 42, "0.01", 77)),
+    transport.emit(update("NEW", "NEW", "BTC-PERP-2", 43, "0.02", 78)),
+    transport.emit(update("TRADE", "FILLED", "BTC-PERP-2", 43, "0.02", 79)),
+    transport.emit(update("TRADE", "FILLED", "BTC-PERP-1", 42, "0.01", 80))
+  ]);
+  await venue.close();
+
+  assert.deepEqual(events.map((event) => event.type), ["ORDER_ACK", "ORDER_ACK", "FILL", "FILL"]);
+  assert.deepEqual(events.map((event) => event.type === "FILL" ? event.fill.clientOrderId : event.ack.clientOrderId), [
+    "BTC-PERP-1", "BTC-PERP-2", "BTC-PERP-2", "BTC-PERP-1"
+  ]);
+});
+
 test("emergency cleanup uses one authoritative reduce-only order and reconciles FLAT", async () => {
   const transport = new FakeTransport("LONG");
-  const venue = new BinanceUsdsTestnetVenue({
+  const venue = new BinanceUsdsVenue({
     canonicalSymbol: "BTC-PERP",
     venueSymbol: "BTCUSDT",
     transport
@@ -94,7 +148,7 @@ test("emergency cleanup uses one authoritative reduce-only order and reconciles 
   ]);
 });
 
-class FakeTransport implements BinanceTestnetTransport {
+class FakeTransport implements BinanceUsdsTransport {
   private handler: ((update: BinanceOrderTradeUpdate) => void | Promise<void>) | null = null;
   private positionSide: "FLAT" | "LONG";
   readonly submissions: Array<{
@@ -157,26 +211,33 @@ function symbolRules(): BinanceSymbolRules {
   };
 }
 
-function update(executionType: string, status: string): BinanceOrderTradeUpdate {
+function update(
+  executionType: string,
+  status: string,
+  clientOrderId = "BTC-PERP-1",
+  exchangeOrderId = 42,
+  quantity = "0.01",
+  tradeId = 77
+): BinanceOrderTradeUpdate {
   return {
     e: "ORDER_TRADE_UPDATE",
     E: 3,
     T: 3,
     o: {
       s: "BTCUSDT",
-      c: "BTC-PERP-1",
+      c: clientOrderId,
       S: "BUY",
       x: executionType,
       X: status,
-      i: 42,
-      q: "0.01",
+      i: exchangeOrderId,
+      q: quantity,
       p: "100",
       ap: "100.5",
-      l: "0.004",
+      l: executionType === "TRADE" && status === "FILLED" ? quantity : "0.004",
       L: "100.5",
       n: "0.01",
       T: 3,
-      t: 77
+      t: tradeId
     }
   };
 }

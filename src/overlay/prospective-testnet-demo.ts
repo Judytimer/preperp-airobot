@@ -6,9 +6,9 @@ import { pathToFileURL } from "node:url";
 import { resolveRepositoryCommit } from "../build-identity.ts";
 
 import {
-  BinanceUsdsTestnetMarketFeed,
-  BinanceUsdsTestnetVenue,
-  OfficialBinanceUsdsTestnetTransport
+  BinanceUsdsMarketFeed,
+  BinanceUsdsVenue,
+  OfficialBinanceUsdsTransport
 } from "../binance-testnet.ts";
 import { PerpBot } from "../bot.ts";
 import { ObservedExecutionVenue } from "../closure-smoke.ts";
@@ -154,16 +154,17 @@ export async function executeCandidateOnTestnet(
 ): Promise<ProspectiveTestnetDemoReport> {
   const entrySide = "direction" in candidate && candidate.direction === "DOWN" ? "SHORT" : "LONG";
   const mapping = testnetDemoMapping(candidate.asset, entrySide);
-  const transport = new OfficialBinanceUsdsTestnetTransport(apiKey, apiSecret);
+  const transport = new OfficialBinanceUsdsTransport({ apiKey, apiSecret, environment: "TESTNET" });
   await transport.ensureIsolatedMarginWhenFlat(mapping.venueSymbol);
-  const venue = new BinanceUsdsTestnetVenue({
+  const venue = new BinanceUsdsVenue({
     canonicalSymbol: mapping.canonicalSymbol,
     venueSymbol: mapping.venueSymbol,
     transport
   });
-  const feed = new BinanceUsdsTestnetMarketFeed({
+  const feed = new BinanceUsdsMarketFeed({
     canonicalSymbol: mapping.canonicalSymbol,
-    venueSymbol: mapping.venueSymbol
+    venueSymbol: mapping.venueSymbol,
+    environment: "TESTNET"
   });
   const signal = new CandidateTestnetDemoSignal(candidate.candidateId, mapping.side);
   let bot: PerpBot | undefined;
@@ -371,7 +372,7 @@ async function writeStatus(status: PredictionTestnetDemoStatus): Promise<void> {
 
 async function waitForFlatReconciliation(
   bot: PerpBot,
-  venue: Pick<BinanceUsdsTestnetVenue, "snapshot">
+  venue: Pick<BinanceUsdsVenue, "snapshot">
 ): Promise<{ snapshot: ExchangeStateSnapshot; reconciliation: ReconciliationReport }> {
   const deadline = Date.now() + RECONCILIATION_TIMEOUT_MS;
   let lastError: unknown;

@@ -1,10 +1,12 @@
 # PrePerp
 
-**Prediction-Market Driven Perpetual Futures Testnet Bot**
+**Evidence-first prediction-market research and perpetual-futures execution system**
 
-PrePerp 持续采集 Polymarket 与 Binance 的真实公开数据，由确定性规则生成 prospective Candidate，再通过 Risk、订单生命周期和权威 reconciliation，在 Binance Futures Testnet 完成一次性自动交易闭环。中文 Tauri 桌面端负责观察和监督，本地 Laya 只做 Shadow Review，没有下单权。
+PrePerp 持续采集 Polymarket 与 Binance 的真实公开数据，由确定性规则生成 prospective Candidate，再通过 Risk、订单生命周期和权威 reconciliation，在 Binance Futures Testnet 完成一次性自动交易闭环。项目也实现了受严格上限约束的 Mainnet 微额验证协议，但尚未执行主网订单。中文 Tauri 桌面端负责观察和监督，本地 Laya 只做 Shadow Review，没有下单权。
 
 > 这是一套交易工程与研究证据系统，不是盈利宣传，也不是已获授权的实盘机器人。
+
+快速入口：[运行与验证](#快速运行) · [系统架构](#系统如何工作) · [真钱边界](#mainnet-微额真钱闭环) · [桌面端](desktop/README.md) · [完整文档](docs/README.md)
 
 ## 当前状态
 
@@ -15,8 +17,11 @@ PrePerp 持续采集 Polymarket 与 Binance 的真实公开数据，由确定性
 | MA strategy → Testnet | `PASS` |
 | Prediction Candidate → Testnet | `PASS` |
 | 中文桌面控制台 | `AVAILABLE` |
-| Mainnet / Micro-Capital | `DISABLED` |
+| Mainnet / Micro-Capital | `IMPLEMENTED / NOT YET EXECUTED` |
 | 可持续 alpha | `NOT CLAIMED` |
+| 最新全量测试 | `189 PASS / 0 FAIL / 2 SKIP` |
+
+当前工程结论很明确：执行真实性已经从 Paper 推进到认证 Testnet，并具备受限 Mainnet 微额闭环代码；盈利能力仍需依靠多笔、前瞻、不可回填的真钱样本验证，不能由一次 Testnet 或一次主网往返推出。
 
 ## 已跑通的 Prediction → Testnet 闭环
 
@@ -179,6 +184,44 @@ Prediction 驱动的 Testnet runner 必须满足：
 
 小时 `UP → LONG`、`DOWN → SHORT` 只属于 `TESTNET_DEMO_ONLY_V1`。它用于证明信号可以驱动执行系统，不进入 Stage A/B，不授权 Mainnet，也不声称 Prediction→Perp directional edge。
 
+## Mainnet 微额真钱闭环
+
+主网不是“测试网一盈利就自动放开”。测试网余额没有经济含义，只验证接口、订单状态机和对账。真钱阶段独立验证滑点、手续费、真实成交和操作可靠性；策略盈利仍需靠多笔前瞻样本判断。
+
+当前实现采用两阶段一次性授权：
+
+```text
+prepare（只读）
+→ 核验全账户空仓、零挂单、One-way、Isolated、单资产保证金
+→ 核验交易规则、数量、名义金额和可用余额
+→ 生成 10 分钟过期、SHA-256 内容寻址的 planId
+
+execute（真钱）
+→ 必须同时提供精确 planId + EXECUTE_REAL_MONEY_ONCE:<planId>
+→ 再次核验账户、价格和 Binance 历史订单（最大漂移 100 bps）
+→ user stream 就绪后再次核验全账户，再创建不可重复执行锁
+→ 1× 杠杆、下单前 `quantity × lastPrice ≤ 25 USDT`、一次 MARKET entry
+→ entry 的实际成交量大于零后立即发出 reduce-only MARKET FLAT；余量终止时按真实持仓补齐退出
+→ 最终要求本地与 Binance 都 FLAT、零挂单、reconciliation consistent
+```
+
+`.env` 必须由操作者显式填写，仓库不会提供真钱默认值：
+
+```dotenv
+BINANCE_MAINNET_API_KEY=...
+BINANCE_MAINNET_API_SECRET=...
+PREPERP_MICRO_SYMBOL=...
+PREPERP_MICRO_SIDE=LONG_or_SHORT
+PREPERP_MICRO_QUANTITY=...
+PREPERP_MICRO_MAX_NOTIONAL_USDT=...
+```
+
+API key 应只启用 Futures 交易、禁用提现并绑定 IP。plan 会冻结 commit 与关键执行源码的 SHA-256 指纹，Prepare 之后源码发生变化就拒绝执行。先运行 `npm run mainnet:micro:prepare`，人工核对输出的 plan 后，再设置 `PREPERP_MAINNET_PLAN_ID=<planId>` 与 `PREPERP_MAINNET_ARM=EXECUTE_REAL_MONEY_ONCE:<planId>`，最后运行 `npm run mainnet:micro:execute`。本地锁与 plan 专属 clientOrderId/交易所历史检查共同阻止重放；任何已消费授权都不会自动重试。
+
+费用按 Binance 返回的资产分别汇总；只有全部费用都能按 USDT 解释时才给出 `netPnlUsdt`，否则明确返回 `null`，避免把 BNB 等手续费误当 USDT。当前代码和确定性仿真已验证该闭环，但尚未提交任何主网订单。
+
+完整边界与设计分类见：[Mainnet Micro-Capital v1](docs/research/mainnet-micro-capital-v1.md)。
+
 ## 交易执行核心
 
 底层执行路径覆盖：
@@ -199,7 +242,9 @@ Market
 已经实现并测试：
 
 - command 与 exchange fact 分离；
-- Partial Fill、delayed Fill 与 fillId 幂等；
+- 多张并发订单、乱序 ACK/Fill、Partial Fill、delayed Fill 与 fillId 幂等；
+- cancel intent 与订单状态正交；冲突 entry 会全部确认终止后，才允许 reduce-only exit；
+- `CANCELED / EXPIRED / EXPIRED_IN_MATCH / REJECTED` 统一进入权威终态；
 - Late Fill 对终态账本的权威修正；
 - filled position + unresolved order 的 projected exposure；
 - cross-zero position；
@@ -223,11 +268,14 @@ Market
 安装与测试：
 
 ```bash
-npm install
+npm ci
 npm run desktop:install
+npm run typecheck
 npm test
 npm run desktop:check
 ```
+
+核心 Node 测试不要求交易所凭证。当前 Windows 环境的最新结果为 191 项测试：189 通过、0 失败、2 项因缺少 POSIX Bash 跳过。
 
 启动中文桌面控制台：
 
@@ -274,6 +322,8 @@ BINANCE_TESTNET_API_SECRET=...
 | `npm run testnet` | MA strategy Testnet smoke |
 | `npm run laya:review:next` | 运行下一条只读 Laya Shadow Review |
 | `npm run testnet:market` | 只读 Testnet market smoke |
+| `npm run mainnet:micro:prepare` | 只读生成、校验微额主网 plan；不发订单 |
+| `npm run mainnet:micro:execute` | 需要 plan 专属人工授权的真钱往返 |
 
 ## 关键代码
 
@@ -281,13 +331,15 @@ BINANCE_TESTNET_API_SECRET=...
 src/
 ├─ bot.ts                              execution orchestration
 ├─ risk.ts                             deterministic risk boundary
-├─ order-tracker.ts                    ACK / Fill lifecycle
+├─ order-tracker.ts                    ACK / Fill / terminal lifecycle
 ├─ position.ts                         position and realized PnL
 ├─ reconciliation.ts                   local vs exchange truth
-├─ binance-testnet.ts                  authenticated venue adapter
+├─ binance-testnet.ts                  Binance USDⓈ-M venue adapter
+├─ mainnet-micro.ts                    capped two-phase Mainnet protocol
+├─ observed-execution-venue.ts         post-processing evidence observer
 ├─ overlay/
 │  ├─ price-target-collector.ts        daily watcher entry
-│  ├─ hourly-up-down-collector.ts      seven-asset hourly lane
+│  ├─ hourly-up-down-collector.ts      15-asset hourly discovery lane
 │  ├─ prospective-testnet-demo.ts      one-shot Candidate consumer
 │  └─ laya-candidate-review.ts         read-only AI shadow
 └─ observability/domain-event.ts       append-only runtime events
@@ -306,7 +358,8 @@ desktop/
 4. [Order Tracker Late Fill](docs/cases/order-tracker-late-fill.md)
 5. [高流动性 Prediction 供给审计](docs/research/high-liquidity-prediction-supply-2026-10-08.md)
 6. [Price-Target Admission v1.1](docs/research/price-target-variant-admission-v1.1.md)
-7. [面试复盘入口](docs/interview/README.md)
+7. [Mainnet Micro-Capital v1](docs/research/mainnet-micro-capital-v1.md)
+8. [面试复盘入口](docs/interview/README.md)
 
 ## 明确不声称
 
@@ -321,4 +374,4 @@ PrePerp 当前不声称：
 
 项目真正证明的是：
 
-> 从真实 prospective 数据、不可变 evidence 和确定性 Candidate 开始，研究信号可以在不放大 AI 权限的前提下，安全驱动一条可观察、可复算、失败即关闭的 Testnet 交易闭环。
+> 从真实 prospective 数据、不可变 evidence 和确定性 Candidate 开始，研究信号可以在不放大 AI 权限的前提下，安全驱动一条可观察、可复算、失败即关闭的交易闭环；当前已验证到 Testnet，Mainnet 微额协议仍等待首次人工授权执行。

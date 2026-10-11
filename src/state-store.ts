@@ -118,7 +118,11 @@ function isOrderTrackerState(value: unknown): boolean {
       isNonNegativeNumber(order.originalQty) &&
       isNonNegativeNumber(order.filledQty) &&
       isNonNegativeNumber(order.remainingQty) &&
-      ["SUBMITTED", "ACKED", "PARTIALLY_FILLED", "CANCEL_REQUESTED", "FILLED", "CANCELED"].includes(
+      (order.cancelRequested === undefined || typeof order.cancelRequested === "boolean") &&
+      [
+        "SUBMITTED", "ACKED", "PARTIALLY_FILLED", "CANCEL_REQUESTED", "FILLED", "CANCELED",
+        "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"
+      ].includes(
         String(order.status)
       )
     );

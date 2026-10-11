@@ -58,6 +58,9 @@ export class RiskManager {
     }
 
     const side: OrderSide = deltaQty > 0 ? "BUY" : "SELL";
+    const reduceOnly = currentSignedQty !== 0 &&
+      Math.sign(targetSignedQty) * Math.sign(currentSignedQty) >= 0 &&
+      Math.abs(targetSignedQty) < Math.abs(currentSignedQty);
     return {
       approved: true,
       order: {
@@ -65,6 +68,7 @@ export class RiskManager {
         side,
         qty: Math.abs(deltaQty),
         price: tick.lastPrice,
+        ...(reduceOnly ? { reduceOnly: true } : {}),
         reason: signal.reason,
         ts: tick.ts
       }

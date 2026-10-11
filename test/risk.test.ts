@@ -54,6 +54,7 @@ test("LONG 0.01 -> target FLAT requires SELL 0.01", () => {
   if (decision.approved) {
     assert.equal(decision.order.side, "SELL");
     assert.equal(decision.order.qty, 0.01);
+    assert.equal(decision.order.reduceOnly, true);
   }
 });
 
@@ -63,7 +64,14 @@ test("SHORT 0.01 -> target FLAT requires BUY 0.01", () => {
   if (decision.approved) {
     assert.equal(decision.order.side, "BUY");
     assert.equal(decision.order.qty, 0.01);
+    assert.equal(decision.order.reduceOnly, true);
   }
+});
+
+test("crossing through zero is not mislabeled reduce-only", () => {
+  const decision = evaluate("SHORT", position("LONG", 0.02));
+  assert.equal(decision.approved, true);
+  if (decision.approved) assert.equal(decision.order.reduceOnly, undefined);
 });
 
 test("explicit PerpIntent quantity resizes a same-side target by delta", () => {

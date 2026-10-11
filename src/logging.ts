@@ -1,8 +1,8 @@
 import type {
-  CancelAck,
   Fill,
   FundingSettlement,
   OrderAck,
+  OrderTerminal,
   Position,
   RiskDecision,
   Signal,
@@ -26,21 +26,21 @@ export function formatRisk(decision: RiskDecision): string {
     return `[RISK] blocked reason="${decision.reason}"`;
   }
 
-  return `[RISK] approved side=${decision.order.side} qty=${decision.order.qty} price=${decision.order.price}`;
+  return `[RISK] approved side=${decision.order.side} qty=${decision.order.qty} price=${decision.order.price} reduceOnly=${decision.order.reduceOnly === true}`;
 }
 
 export function formatAck(ack: OrderAck): string {
-  return `[ACK] clientOrderId=${ack.clientOrderId} exchangeOrderId=${ack.exchangeOrderId} side=${ack.request.side} qty=${ack.request.qty} price=${ack.request.price}`;
+  return `[ACK] clientOrderId=${ack.clientOrderId} exchangeOrderId=${ack.exchangeOrderId} side=${ack.request.side} qty=${ack.request.qty} price=${ack.request.price} reduceOnly=${ack.request.reduceOnly === true}`;
 }
 
-export function formatCancelAck(ack: CancelAck): string {
-  return `[CANCEL_ACK] clientOrderId=${ack.clientOrderId} exchangeOrderId=${ack.exchangeOrderId} status=${ack.status} ts=${ack.ts}`;
+export function formatOrderTerminal(terminal: OrderTerminal): string {
+  return `[ORDER_TERMINAL] clientOrderId=${terminal.clientOrderId} exchangeOrderId=${terminal.exchangeOrderId} status=${terminal.status} reason=${terminal.reason ?? "n/a"} ts=${terminal.ts}`;
 }
 
 export function formatFill(fill: Fill): string {
   return `[FILL] fillId=${fill.fillId} clientOrderId=${fill.clientOrderId} exchangeOrderId=${fill.exchangeOrderId} side=${fill.side} qty=${fill.qty} price=${fill.price} fee=${fill.fee.toFixed(
     4
-  )}`;
+  )} feeAsset=${fill.feeAsset ?? "UNKNOWN"} venueRealizedPnl=${fill.venueRealizedPnl ?? "n/a"}`;
 }
 
 export function formatFunding(settlement: FundingSettlement, payment: number): string {
@@ -48,7 +48,7 @@ export function formatFunding(settlement: FundingSettlement, payment: number): s
 }
 
 export function formatOrderState(order: InFlightOrder): string {
-  return `[ORDER] clientOrderId=${order.clientOrderId} exchangeOrderId=${order.exchangeOrderId ?? "pending"} status=${order.status} filled=${order.filledQty} remaining=${order.remainingQty}`;
+  return `[ORDER] clientOrderId=${order.clientOrderId} exchangeOrderId=${order.exchangeOrderId ?? "pending"} status=${order.status} cancelRequested=${order.cancelRequested} filled=${order.filledQty} remaining=${order.remainingQty}`;
 }
 
 export function formatAccount(snapshot: MarginSnapshot): string {
