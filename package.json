@@ -9,15 +9,39 @@
   "scripts": {
     "start": "node --experimental-strip-types src/index.ts",
     "demo": "node --experimental-strip-types src/interview-demo.ts",
-    "smoke:closure": "node --experimental-strip-types src/closure-smoke.ts",
+    "validate:perp": "node --experimental-strip-types src/perp-execution-validation.ts",
+    "validate:perp:testnet": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/perp-testnet-validation.ts",
+    "smoke:closure": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/closure-smoke.ts",
     "testnet:market": "node --experimental-strip-types src/testnet-market-smoke.ts",
-    "testnet": "node --experimental-strip-types src/testnet-index.ts",
+    "testnet": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/testnet-index.ts",
     "acquire:formal-case-1": "bash scripts/acquire-formal-case-1.sh",
     "overlay": "node --experimental-strip-types src/overlay-index.ts",
+    "prospective:discover": "node --experimental-strip-types src/overlay/prospective-discovery.ts",
+    "manifest:check": "node --experimental-strip-types src/overlay/prospective-manifest.ts",
+    "strategy-lab:replay": "node --env-file-if-exists=.env --experimental-strip-types src/overlay/prospective-runner.ts",
+    "prospective:outcome": "node --experimental-strip-types src/overlay/prospective-outcome.ts",
+    "price-target:manifest": "node --experimental-strip-types src/overlay/price-target-admission.ts",
+    "price-target:collect": "node --experimental-strip-types src/overlay/price-target-collector.ts",
+    "price-target:watch": "node --experimental-strip-types src/overlay/price-target-collector.ts --watch",
+    "laya:review:next": "node --experimental-strip-types src/overlay/laya-review-smoke.ts",
+    "smoke:prediction:prospective": "node --experimental-strip-types src/overlay/prospective-paper-smoke.ts",
+    "smoke:prediction:testnet": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-testnet-clock-bootstrap.ts src/overlay/prospective-testnet-demo.ts",
+    "mainnet:micro:prepare": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-mainnet-clock-bootstrap.ts src/mainnet-micro.ts prepare",
+    "mainnet:micro:execute": "node --env-file-if-exists=.env --experimental-strip-types --import ./src/binance-mainnet-clock-bootstrap.ts src/mainnet-micro.ts execute",
+    "monad:probe": "node --env-file-if-exists=.env --experimental-strip-types src/monad/readiness.ts",
+    "desktop:install": "npm --prefix desktop install",
+    "desktop:dev": "npm --prefix desktop run tauri:dev",
+    "desktop:frontend": "npm --prefix desktop run build",
+    "desktop:build": "npm --prefix desktop run tauri:build",
+    "desktop:check": "npm --prefix desktop run build && cargo check --manifest-path desktop/src-tauri/Cargo.toml",
     "replay": "node --experimental-strip-types src/replay-index.ts",
+    "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
     "@binance/derivatives-trading-usds-futures": "^38.1.1"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
   }
 }

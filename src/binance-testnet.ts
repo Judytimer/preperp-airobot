@@ -1,7 +1,10 @@
 import {
+  DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL,
   DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL,
+  DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
   DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_TESTNET_URL,
-  DerivativesTradingUsdsFutures
+  DerivativesTradingUsdsFutures,
+  DerivativesTradingUsdsFuturesRestAPI
 } from "@binance/derivatives-trading-usds-futures";
 
 import type { ExecutionEvent, OrderRequest, SubmitOrderCommand, Tick } from "./types.ts";
@@ -10,6 +13,25 @@ import type { ExchangeStateSnapshot } from "./reconciliation.ts";
 import { round } from "./math.ts";
 
 type ErrorHandler = (error: unknown) => void;
+
+export type BinanceUsdsEnvironment = "TESTNET" | "MAINNET";
+
+export type BinanceUsdsEndpoints = {
+  readonly rest: string;
+  readonly websocketStreams: string;
+};
+
+export function binanceUsdsEndpoints(environment: BinanceUsdsEnvironment): BinanceUsdsEndpoints {
+  return environment === "MAINNET"
+    ? {
+        rest: DERIVATIVES_TRADING_USDS_FUTURES_REST_API_PROD_URL,
+        websocketStreams: DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL
+      }
+    : {
+        rest: DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL,
+        websocketStreams: DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_TESTNET_URL
+      };
+}
 
 export type BinanceOrderTradeUpdate = {
   e: "ORDER_TRADE_UPDATE";
@@ -25,9 +47,13 @@ export type BinanceOrderTradeUpdate = {
     q?: string;
     p?: string;
     ap?: string;
+    z?: string;
     l?: string;
     L?: string;
+    N?: string;
     n?: string;
+    rp?: string;
+    er?: string | number;
     T?: number | bigint;
     t?: number | bigint;
   };
@@ -43,7 +69,7 @@ export type BinanceSymbolRules = {
   minNotional: number | null;
 };
 
-export interface BinanceTestnetTransport {
+export interface BinanceUsdsTransport {
   loadSymbolRules(symbol: string): Promise<BinanceSymbolRules>;
   validateAccountMode(symbol: string): Promise<void>;
   connectUserData(handler: (update: BinanceOrderTradeUpdate) => void | Promise<void>): Promise<void>;
@@ -52,35 +78,75 @@ export interface BinanceTestnetTransport {
     side: "BUY" | "SELL";
     quantity: number;
     clientOrderId: string;
+    reduceOnly?: boolean;
   }): Promise<void>;
   cancelOrder(command: { symbol: string; clientOrderId: string }): Promise<void>;
   loadSnapshot(symbol: string, canonicalSymbol: string): Promise<ExchangeStateSnapshot>;
   close(): Promise<void>;
 }
 
-export class OfficialBinanceUsdsTestnetTransport implements BinanceTestnetTransport {
+export type BinanceMicroCapitalAccountStatus = {
+  readonly canTrade: boolean;
+  readonly multiAssetsMargin: boolean;
+  readonly availableBalance: number;
+  readonly nonFlatSymbols: readonly string[];
+  readonly openOrderSymbols: readonly string[];
+};
+
+export type BinanceMarketSnapshot = {
+  readonly lastPrice: number;
+  readonly markPrice: number;
+  readonly indexPrice: number;
+  readonly observedAt: number;
+};
+
+export const AMBIGUOUS_SUBMIT_QUARANTINE_MS = 60_000;
+
+export class AmbiguousOrderResultError extends Error {
+  readonly clientOrderId: string;
+  readonly cause: unknown;
+
+  constructor(clientOrderId: string, cause: unknown) {
+    super(`Binance market-order ${clientOrderId} remains UNKNOWN after quarantine; manual reconciliation is required`);
+    this.name = "AmbiguousOrderResultError";
+    this.clientOrderId = clientOrderId;
+    this.cause = cause;
+  }
+}
+
+export class OfficialBinanceUsdsTransport implements BinanceUsdsTransport {
   private readonly client: DerivativesTradingUsdsFutures;
   private readonly onError: ErrorHandler;
+  readonly environment: BinanceUsdsEnvironment;
   private connection: any = null;
   private stream: any = null;
   private keepaliveTimer: NodeJS.Timeout | null = null;
+  private userDataStreamOpen = false;
 
-  constructor(apiKey: string, apiSecret: string, onError: ErrorHandler = console.error) {
+  constructor(config: {
+    readonly apiKey: string;
+    readonly apiSecret: string;
+    readonly environment: BinanceUsdsEnvironment;
+    readonly onError?: ErrorHandler;
+  }) {
+    const { apiKey, apiSecret, environment } = config;
     if (apiKey.length === 0 || apiSecret.length === 0) {
-      throw new Error("Binance Testnet API key and secret are required");
+      throw new Error(`Binance ${environment} API key and secret are required`);
     }
-    this.onError = onError;
+    this.environment = environment;
+    this.onError = config.onError ?? console.error;
+    const endpoints = binanceUsdsEndpoints(environment);
     this.client = new DerivativesTradingUsdsFutures({
       configurationRestAPI: {
         apiKey,
         apiSecret,
-        basePath: DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL,
+        basePath: endpoints.rest,
         timeout: 5_000,
         // A timed-out createOrder is ambiguous. Core must reconcile it; transport must not retry it.
         retries: 0
       },
       configurationWebsocketStreams: {
-        wsURL: DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_TESTNET_URL,
+        wsURL: endpoints.websocketStreams,
         reconnectDelay: 5_000
       }
     });
@@ -98,21 +164,118 @@ export class OfficialBinanceUsdsTestnetTransport implements BinanceTestnetTransp
     ]);
     const positionMode = await positionModeResponse.data();
     if (positionMode.dualSidePosition !== false) {
-      throw new Error("Binance Testnet account must use One-way Mode");
+      throw new Error(`Binance ${this.environment} account must use One-way Mode`);
     }
     const symbolConfig = (await symbolConfigResponse.data()).find((item) => item.symbol === symbol);
     if (String(symbolConfig?.marginType).toUpperCase() !== "ISOLATED") {
-      throw new Error(`Binance Testnet ${symbol} must use isolated margin`);
+      throw new Error(`Binance ${this.environment} ${symbol} must use isolated margin`);
     }
   }
 
+  async ensureIsolatedMarginWhenFlat(symbol: string): Promise<void> {
+    const [positionModeResponse, symbolConfigResponse] = await Promise.all([
+      this.client.restAPI.getCurrentPositionMode(),
+      this.client.restAPI.symbolConfiguration({ symbol })
+    ]);
+    const positionMode = await positionModeResponse.data();
+    if (positionMode.dualSidePosition !== false) {
+      throw new Error(`Binance ${this.environment} account must use One-way Mode`);
+    }
+    const symbolConfig = (await symbolConfigResponse.data()).find((item) => item.symbol === symbol);
+    if (String(symbolConfig?.marginType).toUpperCase() === "ISOLATED") return;
+
+    const [positionsResponse, ordersResponse] = await Promise.all([
+      this.client.restAPI.positionInformationV3({ symbol }),
+      this.client.restAPI.currentAllOpenOrders({ symbol })
+    ]);
+    const positions = await positionsResponse.data();
+    const orders = await ordersResponse.data();
+    const hasPosition = positions.some((position) => position.symbol === symbol && Number(position.positionAmt) !== 0);
+    const hasOpenOrders = orders.some((order) => order.symbol === symbol);
+    if (hasPosition || hasOpenOrders) {
+      throw new Error(`Binance ${this.environment} ${symbol} cannot switch to isolated margin with exposure or open orders`);
+    }
+    await this.client.restAPI.changeMarginType({ symbol, marginType: "ISOLATED" as never });
+    await this.validateAccountMode(symbol);
+  }
+
+  async ensureInitialLeverageWhenFlat(symbol: string, leverage: number): Promise<void> {
+    if (!Number.isInteger(leverage) || leverage < 1 || leverage > 125) {
+      throw new Error("Binance leverage must be an integer in 1..125");
+    }
+    const [positionsResponse, ordersResponse] = await Promise.all([
+      this.client.restAPI.positionInformationV3({ symbol }),
+      this.client.restAPI.currentAllOpenOrders({ symbol })
+    ]);
+    const positions = await positionsResponse.data();
+    const orders = await ordersResponse.data();
+    if (
+      positions.some((position) => position.symbol === symbol && Number(position.positionAmt) !== 0) ||
+      orders.some((order) => order.symbol === symbol)
+    ) {
+      throw new Error(`Binance ${this.environment} ${symbol} leverage cannot change with exposure or open orders`);
+    }
+    await this.client.restAPI.changeInitialLeverage({ symbol, leverage });
+    const configs = await (await this.client.restAPI.symbolConfiguration({ symbol })).data();
+    const actual = Number(configs.find((item) => item.symbol === symbol)?.leverage);
+    if (actual !== leverage) {
+      throw new Error(`Binance ${this.environment} ${symbol} leverage is ${actual}, expected ${leverage}`);
+    }
+  }
+
+  async loadMicroCapitalAccountStatus(): Promise<BinanceMicroCapitalAccountStatus> {
+    const [accountResponse, positionsResponse, ordersResponse] = await Promise.all([
+      this.client.restAPI.accountInformationV2(),
+      this.client.restAPI.positionInformationV3(),
+      this.client.restAPI.currentAllOpenOrders()
+    ]);
+    const account = await accountResponse.data();
+    const positions = await positionsResponse.data();
+    const orders = await ordersResponse.data();
+    return {
+      canTrade: account.canTrade === true,
+      multiAssetsMargin: account.multiAssetsMargin === true,
+      availableBalance: nonNegativeNumber(account.availableBalance ?? "0", "available balance"),
+      nonFlatSymbols: [...new Set(positions
+        .filter((position) => Number(position.positionAmt) !== 0)
+        .map((position) => requiredString(position.symbol, "position symbol")))].sort(),
+      openOrderSymbols: [...new Set(orders
+        .map((order) => requiredString(order.symbol, "open-order symbol")))].sort()
+    };
+  }
+
+  async loadMarketSnapshot(symbol: string): Promise<BinanceMarketSnapshot> {
+    const [lastResponse, markResponse] = await Promise.all([
+      this.client.restAPI.symbolPriceTicker({ symbol }),
+      this.client.restAPI.markPrice({ symbol })
+    ]);
+    const last = await lastResponse.data();
+    const mark = await markResponse.data();
+    if (Array.isArray(last) || Array.isArray(mark)) {
+      throw new Error(`Binance ${this.environment} expected single-symbol market snapshots`);
+    }
+    return {
+      lastPrice: positiveNumber(last.price, "last price"),
+      markPrice: positiveNumber(mark.markPrice, "mark price"),
+      indexPrice: positiveNumber(mark.indexPrice, "index price"),
+      observedAt: Date.now()
+    };
+  }
+
+  async hasHistoricalOrderPrefix(symbol: string, clientOrderPrefix: string, startTime: number): Promise<boolean> {
+    const response = await this.client.restAPI.allOrders({ symbol, startTime, limit: 1_000 });
+    const orders = await response.data();
+    return orders.some((order) => String(order.clientOrderId ?? "").startsWith(clientOrderPrefix));
+  }
+
   async connectUserData(handler: (update: BinanceOrderTradeUpdate) => void | Promise<void>): Promise<void> {
-    if (this.connection !== null) throw new Error("Binance Testnet user stream is already connected");
+    if (this.connection !== null) throw new Error(`Binance ${this.environment} user stream is already connected`);
     const response = await this.client.restAPI.startUserDataStream();
     const { listenKey } = await response.data();
     if (typeof listenKey !== "string" || listenKey.length === 0) {
-      throw new Error("Binance Testnet did not return a listen key");
+      throw new Error(`Binance ${this.environment} did not return a listen key`);
     }
+    this.userDataStreamOpen = true;
 
     this.connection = await this.client.websocketStreams.connect();
     this.stream = this.connection.userData(listenKey);
@@ -129,15 +292,43 @@ export class OfficialBinanceUsdsTestnetTransport implements BinanceTestnetTransp
     side: "BUY" | "SELL";
     quantity: number;
     clientOrderId: string;
+    reduceOnly?: boolean;
   }): Promise<void> {
-    await this.client.restAPI.newOrder({
-      symbol: command.symbol,
-      side: command.side,
-      type: "MARKET",
-      quantity: command.quantity,
-      newClientOrderId: command.clientOrderId,
-      newOrderRespType: "ACK"
-    });
+    try {
+      await this.client.restAPI.newOrder({
+        symbol: command.symbol,
+        side: command.side === "BUY"
+          ? DerivativesTradingUsdsFuturesRestAPI.NewOrderSideEnum.BUY
+          : DerivativesTradingUsdsFuturesRestAPI.NewOrderSideEnum.SELL,
+        type: DerivativesTradingUsdsFuturesRestAPI.NewOrderTypeEnum.MARKET,
+        quantity: command.quantity,
+        newClientOrderId: command.clientOrderId,
+        newOrderRespType: DerivativesTradingUsdsFuturesRestAPI.NewOrderNewOrderRespTypeEnum.ACK,
+        reduceOnly: command.reduceOnly === undefined
+          ? undefined
+          : command.reduceOnly
+            ? DerivativesTradingUsdsFuturesRestAPI.NewOrderReduceOnlyEnum.TRUE
+            : DerivativesTradingUsdsFuturesRestAPI.NewOrderReduceOnlyEnum.FALSE
+      });
+    } catch (error) {
+      if (!isPotentiallyAmbiguousSubmitError(error)) throw error;
+      let latestQueryError: unknown;
+      const deadline = Date.now() + AMBIGUOUS_SUBMIT_QUARANTINE_MS;
+      while (Date.now() < deadline) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+        try {
+          await this.client.restAPI.queryOrder({
+            symbol: command.symbol,
+            origClientOrderId: command.clientOrderId
+          });
+          // The submit did reach Binance. ACK/Fill still come only from the user stream.
+          return;
+        } catch (queryError) {
+          latestQueryError = queryError;
+        }
+      }
+      throw new AmbiguousOrderResultError(command.clientOrderId, new AggregateError([error, latestQueryError]));
+    }
   }
 
   async cancelOrder(command: { symbol: string; clientOrderId: string }): Promise<void> {
@@ -195,16 +386,20 @@ export class OfficialBinanceUsdsTestnetTransport implements BinanceTestnetTransp
       await this.connection.disconnect();
       this.connection = null;
     }
-    await this.client.restAPI.closeUserDataStream().catch(this.onError);
+    if (this.userDataStreamOpen) {
+      this.userDataStreamOpen = false;
+      await this.client.restAPI.closeUserDataStream().catch(this.onError);
+    }
   }
 }
 
-export class BinanceUsdsTestnetVenue implements ExecutionVenue {
+export class BinanceUsdsVenue implements ExecutionVenue {
   private readonly canonicalSymbol: string;
   private readonly venueSymbol: string;
-  private readonly transport: BinanceTestnetTransport;
+  private readonly transport: BinanceUsdsTransport;
   private readonly onError: ErrorHandler;
   private readonly submitted = new Map<string, OrderRequest>();
+  private readonly emergencyClientOrderIds = new Set<string>();
   private handler: ExecutionEventHandler | null = null;
   private rules: BinanceSymbolRules | null = null;
   private eventTail: Promise<void> = Promise.resolve();
@@ -212,7 +407,7 @@ export class BinanceUsdsTestnetVenue implements ExecutionVenue {
   constructor(config: {
     canonicalSymbol: string;
     venueSymbol: string;
-    transport: BinanceTestnetTransport;
+    transport: BinanceUsdsTransport;
     onError?: ErrorHandler;
   }) {
     this.canonicalSymbol = config.canonicalSymbol;
@@ -241,14 +436,18 @@ export class BinanceUsdsTestnetVenue implements ExecutionVenue {
     if (command.request.symbol !== this.canonicalSymbol) {
       throw new Error(`order symbol ${command.request.symbol} does not match ${this.canonicalSymbol}`);
     }
-    if (this.rules === null) throw new Error("Binance Testnet venue must be started before submit");
+    if (this.rules === null) throw new Error("Binance venue must be started before submit");
+    if (!/^[.A-Z:/a-z0-9_-]{1,36}$/.test(command.clientOrderId)) {
+      throw new Error("Binance clientOrderId must match the exchange 1..36 character contract");
+    }
     validateMarketOrder(command.request, this.rules);
     this.submitted.set(command.clientOrderId, command.request);
     await this.transport.submitMarketOrder({
       symbol: this.venueSymbol,
       side: command.request.side,
       quantity: command.request.qty,
-      clientOrderId: command.clientOrderId
+      clientOrderId: command.clientOrderId,
+      reduceOnly: command.request.reduceOnly
     });
   }
 
@@ -258,6 +457,43 @@ export class BinanceUsdsTestnetVenue implements ExecutionVenue {
 
   async snapshot(): Promise<ExchangeStateSnapshot> {
     return this.transport.loadSnapshot(this.venueSymbol, this.canonicalSymbol);
+  }
+
+  /** Last-resort cleanup, sized from the authoritative venue snapshot. */
+  async emergencyFlatten(referencePrice: number): Promise<ExchangeStateSnapshot> {
+    const snapshot = await this.snapshot();
+    if (snapshot.position.side === "FLAT") return snapshot;
+    if (snapshot.openOrders.length > 0) {
+      throw new Error("emergency flatten requires zero open orders; manual reconciliation required");
+    }
+    if (this.rules === null) throw new Error("Binance venue must be started before emergency flatten");
+    const request: OrderRequest = {
+      symbol: this.canonicalSymbol,
+      side: snapshot.position.side === "LONG" ? "SELL" : "BUY",
+      qty: snapshot.position.qty,
+      price: referencePrice,
+      reason: "BINANCE_EMERGENCY_REDUCE_ONLY_FLAT",
+      ts: Date.now(),
+      reduceOnly: true
+    };
+    validateMarketOrder(request, this.rules);
+    const clientOrderId = `${safeSymbol(this.canonicalSymbol).slice(0, 8)}-E-${Date.now().toString(36)}`;
+    this.submitted.set(clientOrderId, request);
+    this.emergencyClientOrderIds.add(clientOrderId);
+    await this.transport.submitMarketOrder({
+      symbol: this.venueSymbol,
+      side: request.side,
+      quantity: request.qty,
+      clientOrderId,
+      reduceOnly: true
+    });
+    const deadline = Date.now() + 20_000;
+    while (Date.now() <= deadline) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+      const current = await this.snapshot();
+      if (current.position.side === "FLAT" && current.openOrders.length === 0) return current;
+    }
+    throw new Error("emergency reduce-only flatten did not reconcile FLAT");
   }
 
   async close(): Promise<void> {
@@ -275,18 +511,25 @@ export class BinanceUsdsTestnetVenue implements ExecutionVenue {
       this.submitted.get(clientOrderId)
     );
     if (event === null) return;
+    if (this.emergencyClientOrderIds.has(clientOrderId)) {
+      if (event.type === "ORDER_TERMINAL" || (event.type === "FILL" && update.o?.X === "FILLED")) {
+        this.emergencyClientOrderIds.delete(clientOrderId);
+        this.submitted.delete(clientOrderId);
+      }
+      return;
+    }
     await this.handler?.(event);
-    if (event.type === "CANCEL_ACK" || (event.type === "FILL" && update.o?.X === "FILLED")) {
+    if (event.type === "ORDER_TERMINAL" || (event.type === "FILL" && update.o?.X === "FILLED")) {
       this.submitted.delete(clientOrderId);
     }
   }
 
   private owns(clientOrderId: string): boolean {
-    return clientOrderId.startsWith(`${safeSymbol(this.canonicalSymbol)}-`);
+    return this.submitted.has(clientOrderId) || this.emergencyClientOrderIds.has(clientOrderId);
   }
 }
 
-export class BinanceUsdsTestnetMarketFeed {
+export class BinanceUsdsMarketFeed {
   private readonly canonicalSymbol: string;
   private readonly venueSymbol: string;
   private readonly client: DerivativesTradingUsdsFutures;
@@ -299,18 +542,26 @@ export class BinanceUsdsTestnetMarketFeed {
   private nextSequence = 1;
   private tickTail: Promise<void> = Promise.resolve();
 
-  constructor(config: { canonicalSymbol: string; venueSymbol: string; onError?: ErrorHandler }) {
+  constructor(config: {
+    canonicalSymbol: string;
+    venueSymbol: string;
+    environment: BinanceUsdsEnvironment;
+    onError?: ErrorHandler;
+  }) {
     this.canonicalSymbol = config.canonicalSymbol;
     this.venueSymbol = config.venueSymbol.toUpperCase();
     this.onError = config.onError ?? console.error;
+    const endpoints = binanceUsdsEndpoints(config.environment);
     this.client = new DerivativesTradingUsdsFutures({
       configurationRestAPI: {
-        basePath: DERIVATIVES_TRADING_USDS_FUTURES_REST_API_TESTNET_URL,
+        apiKey: "",
+        apiSecret: "",
+        basePath: endpoints.rest,
         timeout: 5_000,
         retries: 2
       },
       configurationWebsocketStreams: {
-        wsURL: DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_TESTNET_URL,
+        wsURL: endpoints.websocketStreams,
         reconnectDelay: 5_000
       }
     });
@@ -388,7 +639,7 @@ export function mapBinanceOrderUpdate(
       side,
       qty,
       price: firstPositive(order.p, order.ap),
-      reason: "restored from Binance Testnet user stream",
+      reason: "restored from Binance user stream",
       ts
     };
     return {
@@ -411,15 +662,30 @@ export function mapBinanceOrderUpdate(
         qty: positiveNumber(order.l, "last filled quantity"),
         price: positiveNumber(order.L, "last filled price"),
         fee: nonNegativeNumber(order.n ?? "0", "commission"),
+        ...(typeof order.N === "string" && order.N.length > 0 ? { feeAsset: order.N } : {}),
+        ...(order.rp !== undefined ? { venueRealizedPnl: finiteNumber(order.rp, "realized profit") } : {}),
+        ...(["CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"].includes(String(order.X))
+          ? {
+              terminalStatus: order.X as "CANCELED" | "EXPIRED" | "EXPIRED_IN_MATCH" | "REJECTED",
+              ...(order.er !== undefined ? { terminalReason: String(order.er) } : {})
+            }
+          : {}),
         ts
       }
     };
   }
 
-  if (order.x === "CANCELED" && order.X === "CANCELED") {
+  if (["CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"].includes(String(order.X))) {
+    const status = order.X as "CANCELED" | "EXPIRED" | "EXPIRED_IN_MATCH" | "REJECTED";
     return {
-      type: "CANCEL_ACK",
-      ack: { clientOrderId, exchangeOrderId, status: "CANCELED", ts }
+      type: "ORDER_TERMINAL",
+      terminal: {
+        clientOrderId,
+        exchangeOrderId,
+        status,
+        ...(order.er !== undefined ? { reason: String(order.er) } : {}),
+        ts
+      }
     };
   }
 
@@ -468,6 +734,17 @@ function isOrderTradeUpdate(value: unknown): value is BinanceOrderTradeUpdate {
   return isRecord(value) && value.e === "ORDER_TRADE_UPDATE";
 }
 
+function isPotentiallyAmbiguousSubmitError(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  const response = isRecord(error.response) ? error.response : undefined;
+  const status = Number(response?.status ?? error.status);
+  const code = String(error.code ?? "").toUpperCase();
+  const message = String(error.message ?? "").toLowerCase();
+  return status === 503 ||
+    ["ECONNABORTED", "ECONNRESET", "ETIMEDOUT", "ENETUNREACH"].includes(code) ||
+    message.includes("timeout") || message.includes("timed out") || message.includes("socket hang up");
+}
+
 function safeSymbol(symbol: string): string {
   return symbol.replace(/[^A-Za-z0-9_-]/g, "_");
 }
@@ -488,6 +765,12 @@ function firstPositive(...values: unknown[]): number {
 function positiveNumber(value: unknown, label: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`invalid Binance ${label}`);
+  return parsed;
+}
+
+function finiteNumber(value: unknown, label: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`invalid Binance ${label}`);
   return parsed;
 }
 

@@ -1,4 +1,6 @@
-# Meme Spot + Prediction Market Overlay Learning Report
+# Crypto FDV Prediction Overlay：首个具体 Variant 学习报告
+
+> **Scope 提示（2026-10-04）：** 本文记录的是首个具体实现，不是整个策略空间的定义。当前代码类名仍为 `MemePredictionOverlayStrategy`，但更上层的研究命题已重新表述为 **Cross-Market Repricing Lag**；本文的 Meme / FDV 语义应视为当前 Crypto-FDV Variant 的历史实现边界，而不是永久限制。详见 [Strategy Thesis × Variant × Formal Batch：策略边界纠偏说明](strategy-thesis-boundary-correction.md)。
 
 ## 1. 原型做了什么
 

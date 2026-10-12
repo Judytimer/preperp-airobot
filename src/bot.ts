@@ -2,10 +2,10 @@ import type { ExecutionVenue } from "./exchange.ts";
 import {
   formatAck,
   formatAccount,
-  formatCancelAck,
   formatFill,
   formatFunding,
   formatOrderState,
+  formatOrderTerminal,
   formatPosition,
   formatRisk,
   formatSignal,
@@ -16,6 +16,7 @@ import { InFlightOrderTracker } from "./order-tracker.ts";
 import type { InFlightOrder } from "./order-tracker.ts";
 import { RiskManager } from "./risk.ts";
 import { MovingAverageSignal } from "./strategy.ts";
+import type { PerpSignalSource } from "./strategy.ts";
 import { round } from "./math.ts";
 import { IsolatedMarginAccount } from "./margin.ts";
 import type { MarginConfig, MarginSnapshot } from "./margin.ts";
@@ -25,20 +26,32 @@ import { PaperLiquidationExecutor } from "./liquidation.ts";
 import { reconcileState } from "./reconciliation.ts";
 import type { ExchangeStateSnapshot, ReconciliationReport } from "./reconciliation.ts";
 
-export type BotConfig = {
+type CommonBotConfig = {
   symbol: string;
-  shortWindow: number;
-  longWindow: number;
   orderQty: number;
   maxAbsPosition: number;
   venue: ExecutionVenue;
+  clientOrderNamespace?: string;
   margin?: MarginConfig;
   stateStore?: BotStateStore;
   logger?: Logger;
 };
 
+export type BotConfig = CommonBotConfig & (
+  | {
+      shortWindow: number;
+      longWindow: number;
+      signalSource?: never;
+    }
+  | {
+      signalSource: PerpSignalSource;
+      shortWindow?: never;
+      longWindow?: never;
+    }
+);
+
 export class PerpBot {
-  private readonly strategy: MovingAverageSignal;
+  private readonly strategy: PerpSignalSource;
   private readonly risk: RiskManager;
   private readonly venue: ExecutionVenue;
   private positions: PositionBook;
@@ -54,14 +67,22 @@ export class PerpBot {
   private persistTail: Promise<void> = Promise.resolve();
   private nextClientOrderSequence = 1;
   private readonly cancelConfirmations = new Map<string, () => void>();
+  private readonly clientOrderPrefix: string;
 
   constructor(config: BotConfig) {
-    this.strategy = new MovingAverageSignal(config.shortWindow, config.longWindow);
+    this.strategy = "signalSource" in config && config.signalSource !== undefined
+      ? config.signalSource
+      : new MovingAverageSignal(config.shortWindow, config.longWindow);
     this.risk = new RiskManager({
       orderQty: config.orderQty,
       maxAbsPosition: config.maxAbsPosition
     });
     this.venue = config.venue;
+    const clientOrderNamespace = config.clientOrderNamespace ?? config.symbol;
+    if (!/^[A-Za-z0-9_-]{1,24}$/.test(clientOrderNamespace)) {
+      throw new Error("clientOrderNamespace must contain 1..24 safe characters");
+    }
+    this.clientOrderPrefix = clientOrderNamespace;
     this.positions = new PositionBook(config.symbol);
     this.margin = new IsolatedMarginAccount(
       config.margin ?? { collateral: 10_000, leverage: 5, maintenanceMarginRate: 0.005 }
@@ -119,6 +140,15 @@ export class PerpBot {
       return;
     }
 
+    const openOrders = this.orderTracker.getOpenOrders();
+    if (openOrders.some((order) => order.side !== decision.order.side)) {
+      this.logger(
+        `[ORDER_COORDINATOR] target changed; canceling ${openOrders.length} conflicting open order(s) before ${decision.order.side}`
+      );
+      await this.cancelOpenOrders();
+      return;
+    }
+
     const postOrderPosition = projectOrder(projectedPosition, decision.order);
     const postOrderAccount = this.margin.snapshot(postOrderPosition, tick.markPrice);
     if (postOrderAccount.initialMargin > this.lastAccountSnapshot.equity) {
@@ -131,7 +161,7 @@ export class PerpBot {
       `[MARGIN_RISK] approved requiredInitialMargin=${postOrderAccount.initialMargin} equity=${this.lastAccountSnapshot.equity}`
     );
 
-    const clientOrderId = `${configSafeSymbol(decision.order.symbol)}-${this.nextClientOrderSequence++}`;
+    const clientOrderId = `${this.clientOrderPrefix}-${this.nextClientOrderSequence++}`;
     this.orderTracker.trackSubmission(clientOrderId, decision.order);
     // Persist client-owned identity before sending. A crash after this point remains unresolved,
     // rather than being incorrectly treated as proof that no venue order exists.
@@ -159,6 +189,10 @@ export class PerpBot {
     return this.positions.get();
   }
 
+  getOpenOrders(): readonly InFlightOrder[] {
+    return this.orderTracker.getOpenOrders();
+  }
+
   getAccountSnapshot(): MarginSnapshot | null {
     return this.lastAccountSnapshot === null ? null : { ...this.lastAccountSnapshot };
   }
@@ -172,14 +206,7 @@ export class PerpBot {
   }
 
   private async liquidate(position: Position, tick: Tick, snapshot: MarginSnapshot): Promise<void> {
-    for (const cancelRequested of this.orderTracker.requestCancelOpenOrders()) {
-      this.logger(formatOrderState(cancelRequested));
-      const confirmed = new Promise<void>((resolve) => {
-        this.cancelConfirmations.set(cancelRequested.clientOrderId, resolve);
-      });
-      await this.venue.requestCancel(cancelRequested.clientOrderId);
-      await confirmed;
-    }
+    await this.cancelOpenOrders();
 
     const execution = this.liquidationExecutor.execute(position, tick);
     this.logger(
@@ -198,6 +225,35 @@ export class PerpBot {
       throw new Error("invariant violation: cannot value a fill without a latest mark price");
     }
     return this.lastMarkPrice;
+  }
+
+  private async cancelOpenOrders(): Promise<void> {
+    const requested = this.orderTracker.requestCancelOpenOrders();
+    if (requested.length === 0) return;
+    const confirmations = requested.map((order) => new Promise<void>((resolve) => {
+      this.cancelConfirmations.set(order.clientOrderId, resolve);
+    }));
+    for (const order of requested) this.logger(formatOrderState(order));
+    await this.persist();
+    const commandResults = await Promise.allSettled(
+      requested.map((order) => this.venue.requestCancel(order.clientOrderId))
+    );
+    try {
+      await withTimeout(
+        Promise.all(confirmations).then(() => undefined),
+        15_000,
+        `cancel confirmation timed out for ${requested.map((order) => order.clientOrderId).join(",")}`
+      );
+    } catch (confirmationError) {
+      for (const order of requested) this.cancelConfirmations.delete(order.clientOrderId);
+      const commandErrors = commandResults.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : []
+      );
+      throw new AggregateError(
+        [...commandErrors, confirmationError],
+        "cancel commands did not converge to authoritative terminal events"
+      );
+    }
   }
 
   private async restore(): Promise<void> {
@@ -256,12 +312,12 @@ export class PerpBot {
       await this.persist();
       return;
     }
-    if (event.type === "CANCEL_ACK") {
-      this.logger(formatCancelAck(event.ack));
-      this.logger(formatOrderState(this.orderTracker.processCancelAck(event.ack)));
+    if (event.type === "ORDER_TERMINAL") {
+      this.logger(formatOrderTerminal(event.terminal));
+      this.logger(formatOrderState(this.orderTracker.processTerminal(event.terminal)));
       await this.persist();
-      this.cancelConfirmations.get(event.ack.clientOrderId)?.();
-      this.cancelConfirmations.delete(event.ack.clientOrderId);
+      this.cancelConfirmations.get(event.terminal.clientOrderId)?.();
+      this.cancelConfirmations.delete(event.terminal.clientOrderId);
       return;
     }
     const fill = event.fill;
@@ -274,11 +330,25 @@ export class PerpBot {
     this.lastAccountSnapshot = this.margin.snapshot(position, this.requireLatestMarkPrice());
     this.logger(formatAccount(this.lastAccountSnapshot));
     await this.persist();
+    if (!this.orderTracker.getOpenOrders().some((order) => order.clientOrderId === fill.clientOrderId)) {
+      this.cancelConfirmations.get(fill.clientOrderId)?.();
+      this.cancelConfirmations.delete(fill.clientOrderId);
+    }
   }
 }
 
-function configSafeSymbol(symbol: string): string {
-  return symbol.replace(/[^A-Za-z0-9_-]/g, "_");
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function validateTickPrices(tick: Tick): void {

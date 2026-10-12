@@ -1,6 +1,7 @@
 import type { Fill, OrderAck, OrderRequest } from "../types.ts";
 import type {
   OverlayRiskDecision,
+  OverlayPaperExecutionRecord,
   OverlaySignal,
   PredictionPosition,
   ResearchSnapshot,
@@ -48,6 +49,10 @@ export function formatPending(orderId: string, order: OrderRequest): string {
 
 export function formatOverlayFill(fill: Fill): string {
   return `[OVERLAY_FILL] fillId=${fill.fillId} clientOrderId=${fill.clientOrderId} exchangeOrderId=${fill.exchangeOrderId} side=${fill.side} qty=${fill.qty} price=${fill.price}`;
+}
+
+export function formatOverlayExecution(record: OverlayPaperExecutionRecord): string {
+  return `[OVERLAY_EXECUTION] clientOrderId=${record.clientOrderId} side=${record.side} referencePrice=${record.referencePrice} fillPrice=${record.fillPrice} slippageBps=${record.slippageBps} fee=${record.fee} feeModel=ZERO signalAt=${record.signalAt} submitAt=${record.submitAt} fillAt=${record.fillAt}`;
 }
 
 export function formatOverlayPosition(position: PredictionPosition): string {

@@ -1,7 +1,11 @@
 import { sma } from "./math.ts";
 import type { Signal, Tick } from "./types.ts";
 
-export class MovingAverageSignal {
+export interface PerpSignalSource {
+  onTick(tick: Tick): Signal;
+}
+
+export class MovingAverageSignal implements PerpSignalSource {
   private readonly prices: number[] = [];
   private readonly shortWindow: number;
   private readonly longWindow: number;

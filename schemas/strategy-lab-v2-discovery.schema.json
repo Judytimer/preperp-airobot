@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Judytimer/preperp-airobot/schemas/strategy-lab-v2-discovery.schema.json",
+  "title": "Strategy Lab v2.1.x Polymarket First Discovery Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "marketId", "question", "slug", "disposition", "reason", "registeredAt", "market", "discovery"],
+  "properties": {
+    "schemaVersion": { "enum": ["2.1.0", "2.1.1"] },
+    "marketId": { "type": "string", "minLength": 1 },
+    "question": { "type": "string", "minLength": 1 },
+    "slug": { "type": ["string", "null"] },
+    "disposition": { "enum": ["POTENTIAL_FDV_REVIEW", "IGNORED_NON_FDV_TEXT", "DATA_BLOCKED"] },
+    "reason": { "type": "string", "minLength": 1 },
+    "registeredAt": { "$ref": "#/$defs/timestamp" },
+    "market": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createdAt", "openedAt", "updatedAt", "active", "closed", "acceptingOrders", "enableOrderBook", "endDate"],
+      "properties": {
+        "createdAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "openedAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "updatedAt": { "$ref": "#/$defs/nullableTimestamp" },
+        "active": { "type": ["boolean", "null"] },
+        "closed": { "type": ["boolean", "null"] },
+        "acceptingOrders": { "type": ["boolean", "null"] },
+        "enableOrderBook": { "type": ["boolean", "null"] },
+        "endDate": { "$ref": "#/$defs/nullableTimestamp" }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "firstDiscoveredAt", "sourceUrl", "sourceTimestamp", "retrievedAt", "rawResponsePath", "sha256"],
+      "properties": {
+        "provider": { "const": "POLYMARKET_GAMMA" },
+        "firstDiscoveredAt": { "$ref": "#/$defs/timestamp" },
+        "sourceUrl": {
+          "enum": [
+            "https://gamma-api.polymarket.com/markets?closed=false&limit=100&order=createdAt&ascending=false",
+            "https://gamma-api.polymarket.com/public-search?q=FDV&limit_per_type=50&events_status=active&page=1"
+          ]
+        },
+        "sourceTimestamp": { "$ref": "#/$defs/nullableTimestamp" },
+        "retrievedAt": { "$ref": "#/$defs/timestamp" },
+        "rawResponsePath": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "acquisitionClock": {
+      "oneOf": [
+        { "$ref": "#/$defs/legacyAcquisitionClock" },
+        { "$ref": "#/$defs/activeAcquisitionClock" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "schemaVersion": { "const": "2.1.0" } },
+        "required": ["schemaVersion"]
+      },
+      "then": {
+        "properties": {
+          "discovery": {
+            "properties": {
+              "sourceUrl": { "const": "https://gamma-api.polymarket.com/markets?closed=false&limit=100&order=createdAt&ascending=false" }
+            }
+          },
+          "acquisitionClock": { "$ref": "#/$defs/legacyAcquisitionClock" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "schemaVersion": { "const": "2.1.1" } },
+        "required": ["schemaVersion"]
+      },
+      "then": {
+        "required": ["acquisitionClock"],
+        "properties": {
+          "discovery": {
+            "properties": {
+              "sourceUrl": { "const": "https://gamma-api.polymarket.com/public-search?q=FDV&limit_per_type=50&events_status=active&page=1" }
+            }
+          },
+          "acquisitionClock": { "$ref": "#/$defs/activeAcquisitionClock" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "timestamp": { "type": "number", "minimum": 0 },
+    "nullableTimestamp": { "type": ["number", "null"], "minimum": 0 },
+    "legacyAcquisitionClock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "sourceDate", "localRequestStartedAt", "localResponseReceivedAt", "midpointOffsetMs"],
+      "properties": {
+        "basis": { "const": "POLYMARKET_HTTP_DATE" },
+        "sourceDate": { "$ref": "#/$defs/timestamp" },
+        "localRequestStartedAt": { "$ref": "#/$defs/timestamp" },
+        "localResponseReceivedAt": { "$ref": "#/$defs/timestamp" },
+        "midpointOffsetMs": { "type": "number" }
+      }
+    },
+    "activeAcquisitionClock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "sourceDate", "responseAgeSeconds", "localRequestStartedAt", "localResponseReceivedAt", "midpointOffsetMs"],
+      "properties": {
+        "basis": { "const": "POLYMARKET_HTTP_DATE_PLUS_AGE" },
+        "sourceDate": { "$ref": "#/$defs/timestamp" },
+        "responseAgeSeconds": { "type": "integer", "minimum": 0 },
+        "localRequestStartedAt": { "$ref": "#/$defs/timestamp" },
+        "localResponseReceivedAt": { "$ref": "#/$defs/timestamp" },
+        "midpointOffsetMs": { "type": "number" }
+      }
+    }
+  }
+}

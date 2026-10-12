@@ -3,14 +3,16 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 import {
-  BinanceUsdsTestnetMarketFeed,
-  BinanceUsdsTestnetVenue,
-  OfficialBinanceUsdsTestnetTransport
+  BinanceUsdsMarketFeed,
+  BinanceUsdsVenue,
+  OfficialBinanceUsdsTransport
 } from "./binance-testnet.ts";
 import { PerpBot } from "./bot.ts";
-import type { ExecutionEventHandler, ExecutionVenue } from "./exchange.ts";
+import { ObservedExecutionVenue } from "./observed-execution-venue.ts";
+export { ObservedExecutionVenue } from "./observed-execution-venue.ts";
 import type { ExchangeStateSnapshot, ReconciliationReport } from "./reconciliation.ts";
 import { JsonFileBotStateStore } from "./state-store.ts";
+import { runtimeStatePath } from "./runtime-paths.ts";
 import type { ExecutionEvent, Position, SubmitOrderCommand } from "./types.ts";
 import { LayaReviewerAdapter } from "./overlay/laya-reviewer.ts";
 import {
@@ -87,87 +89,6 @@ export type ClosureConfig = {
   readonly layaBaseUrl: string;
   readonly layaApiKey?: string;
 };
-
-type ObserverHooks = {
-  readonly onSubmit?: (command: SubmitOrderCommand) => void;
-  readonly onProcessedEvent?: (event: ExecutionEvent) => void;
-};
-
-/**
- * Composition-only observer. It forwards the original event to PerpBot first,
- * waits for processing/persistence, and only then captures immutable evidence.
- */
-export class ObservedExecutionVenue implements ExecutionVenue {
-  private downstream: ExecutionEventHandler | undefined;
-  private readonly submissions: SubmitOrderCommand[] = [];
-  private readonly events: ExecutionEvent[] = [];
-  private readonly inner: ExecutionVenue;
-  private readonly hooks: ObserverHooks;
-
-  constructor(
-    inner: ExecutionVenue,
-    hooks: ObserverHooks = {}
-  ) {
-    this.inner = inner;
-    this.hooks = hooks;
-    inner.onExecutionEvent(async (event) => {
-      if (this.downstream === undefined) {
-        throw new Error("observed execution venue has no downstream handler");
-      }
-      await this.downstream(event);
-      const evidence = structuredClone(event);
-      this.events.push(evidence);
-      try {
-        this.hooks.onProcessedEvent?.(evidence);
-      } catch {
-        // Acceptance evidence must never acquire execution authority.
-      }
-    });
-  }
-
-  onExecutionEvent(handler: ExecutionEventHandler): void {
-    if (this.downstream !== undefined) {
-      throw new Error("observed execution venue handler is already registered");
-    }
-    this.downstream = handler;
-  }
-
-  async submit(command: SubmitOrderCommand): Promise<void> {
-    const evidence = structuredClone(command);
-    this.submissions.push(evidence);
-    try {
-      this.hooks.onSubmit?.(evidence);
-    } catch {
-      // Acceptance evidence must never acquire execution authority.
-    }
-    await this.inner.submit(command);
-  }
-
-  async requestCancel(clientOrderId: string): Promise<void> {
-    await this.inner.requestCancel(clientOrderId);
-  }
-
-  getSubmissions(): readonly SubmitOrderCommand[] {
-    return structuredClone(this.submissions);
-  }
-
-  getAcknowledgements(): readonly Extract<ExecutionEvent, { type: "ORDER_ACK" }>[] {
-    return structuredClone(
-      this.events.filter(
-        (event): event is Extract<ExecutionEvent, { type: "ORDER_ACK" }> =>
-          event.type === "ORDER_ACK"
-      )
-    );
-  }
-
-  getFills(): readonly Extract<ExecutionEvent, { type: "FILL" }>[] {
-    return structuredClone(
-      this.events.filter(
-        (event): event is Extract<ExecutionEvent, { type: "FILL" }> => event.type === "FILL"
-      )
-    );
-  }
-}
 
 /** Composition-only gate that stops new market ticks after the first submit. */
 export class ClosureTickGate {
@@ -261,11 +182,12 @@ export async function runLiveBinanceClosure(
   config: ClosureConfig,
   context: ClosureRunContext
 ): Promise<BinanceClosureEvidence> {
-  const transport = new OfficialBinanceUsdsTestnetTransport(
-    config.binanceApiKey,
-    config.binanceApiSecret
-  );
-  const venue = new BinanceUsdsTestnetVenue({
+  const transport = new OfficialBinanceUsdsTransport({
+    apiKey: config.binanceApiKey,
+    apiSecret: config.binanceApiSecret,
+    environment: "TESTNET"
+  });
+  const venue = new BinanceUsdsVenue({
     canonicalSymbol: CANONICAL_SYMBOL,
     venueSymbol: VENUE_SYMBOL,
     transport
@@ -310,12 +232,13 @@ export async function runLiveBinanceClosure(
     orderQty: 0.001,
     maxAbsPosition: 0.003,
     margin: { collateral: 1_000, leverage: 5, maintenanceMarginRate: 0.005 },
-    stateStore: new JsonFileBotStateStore(".runtime/binance-testnet-state.json"),
+    stateStore: new JsonFileBotStateStore(runtimeStatePath("binance-testnet-state.json")),
     venue: observedVenue
   });
-  const feed = new BinanceUsdsTestnetMarketFeed({
+  const feed = new BinanceUsdsMarketFeed({
     canonicalSymbol: CANONICAL_SYMBOL,
-    venueSymbol: VENUE_SYMBOL
+    venueSymbol: VENUE_SYMBOL,
+    environment: "TESTNET"
   });
   let venueStarted = false;
   let feedStarted = false;
@@ -401,7 +324,7 @@ export async function runRealLayaClosure(
 
 async function waitForFinalReconciliation(
   bot: PerpBot,
-  venue: BinanceUsdsTestnetVenue
+  venue: BinanceUsdsVenue
 ): Promise<{ snapshot: ExchangeStateSnapshot; reconciliation: ReconciliationReport }> {
   const deadline = Date.now() + FINAL_RECONCILIATION_TIMEOUT_MS;
   let lastSnapshot: ExchangeStateSnapshot | undefined;

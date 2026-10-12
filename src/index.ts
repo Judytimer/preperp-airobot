@@ -3,6 +3,7 @@ import { simulateMarket } from "./market.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import { JsonFileBotStateStore } from "./state-store.ts";
 import { SimulatedExchange } from "./exchange.ts";
+import { runtimeStatePath } from "./runtime-paths.ts";
 
 const symbol = "BTC-PERP";
 const venue = new SimulatedExchange(350);
@@ -13,7 +14,7 @@ const bot = await PerpBot.create({
   orderQty: 0.01,
   maxAbsPosition: 0.03,
   margin: { collateral: 1_000, leverage: 5, maintenanceMarginRate: 0.005 },
-  stateStore: new JsonFileBotStateStore(".runtime/perp-bot-state.json"),
+  stateStore: new JsonFileBotStateStore(runtimeStatePath("perp-bot-state.json")),
   venue
 });
 

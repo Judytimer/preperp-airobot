@@ -28,16 +28,26 @@ export class RiskManager {
       return { approved: false, reason: signal.reason };
     }
 
-    if (signal.action === position.side) {
-      return { approved: false, reason: `already ${position.side}` };
+    const targetQty = signal.targetQty ?? this.orderQty;
+    if ((signal.action === "LONG" || signal.action === "SHORT") &&
+        (!Number.isFinite(targetQty) || targetQty <= 0)) {
+      return { approved: false, reason: "target quantity must be positive" };
     }
-
-    const targetSignedQty = signal.action === "LONG" ? this.orderQty : -this.orderQty;
+    const targetSignedQty = signal.action === "LONG"
+      ? targetQty
+      : signal.action === "SHORT"
+        ? -targetQty
+        : 0;
     const currentSignedQty = signedPosition(position);
     const deltaQty = round(targetSignedQty - currentSignedQty);
 
     if (deltaQty === 0) {
-      return { approved: false, reason: "target position already reached" };
+      return {
+        approved: false,
+        reason: signal.targetQty === undefined && signal.action === position.side
+          ? `already ${position.side}`
+          : "target position already reached"
+      };
     }
 
     if (Math.abs(targetSignedQty) > this.maxAbsPosition) {
@@ -48,6 +58,9 @@ export class RiskManager {
     }
 
     const side: OrderSide = deltaQty > 0 ? "BUY" : "SELL";
+    const reduceOnly = currentSignedQty !== 0 &&
+      Math.sign(targetSignedQty) * Math.sign(currentSignedQty) >= 0 &&
+      Math.abs(targetSignedQty) < Math.abs(currentSignedQty);
     return {
       approved: true,
       order: {
@@ -55,6 +68,7 @@ export class RiskManager {
         side,
         qty: Math.abs(deltaQty),
         price: tick.lastPrice,
+        ...(reduceOnly ? { reduceOnly: true } : {}),
         reason: signal.reason,
         ts: tick.ts
       }

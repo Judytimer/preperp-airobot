@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Judytimer/preperp-airobot/schemas/strategy-lab-v2-observation.schema.json",
+  "title": "Strategy Lab v2.1 Prospective Observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "observationId", "retrievedAt", "rawArtifacts", "candles", "yesPrices"],
+  "properties": {
+    "schemaVersion": { "const": "2.1.0" },
+    "observationId": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+    "retrievedAt": { "$ref": "#/$defs/timestamp" },
+    "rawArtifacts": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "candles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["openTs", "closeTs", "close"],
+        "properties": {
+          "openTs": { "$ref": "#/$defs/timestamp" },
+          "closeTs": { "$ref": "#/$defs/timestamp" },
+          "close": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "yesPrices": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ts", "yesPrice"],
+        "properties": {
+          "ts": { "$ref": "#/$defs/timestamp" },
+          "yesPrice": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sourceId", "publishedAt", "summary"],
+        "properties": {
+          "sourceId": { "type": "string", "minLength": 1 },
+          "publishedAt": { "$ref": "#/$defs/timestamp" },
+          "summary": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "timestamp": { "type": "number", "minimum": 0 },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sourceUrl", "sourceTimestamp", "retrievedAt", "path", "sha256"],
+      "properties": {
+        "kind": { "enum": ["BINANCE_SPOT_KLINES", "POLYMARKET_LAST_TRADES"] },
+        "sourceUrl": { "type": "string", "minLength": 1 },
+        "sourceTimestamp": { "$ref": "#/$defs/timestamp" },
+        "retrievedAt": { "$ref": "#/$defs/timestamp" },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

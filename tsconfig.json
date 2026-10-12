@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/mainnet-micro.ts",
+    "src/monad/json-rpc.ts",
+    "src/monad/network.ts",
+    "src/monad/readiness.ts",
+    "src/monad/transaction.ts",
+    "src/binance-mainnet-clock-bootstrap.ts",
+    "src/binance-testnet-clock-bootstrap.ts",
+    "src/binance-testnet-clock.ts",
+    "src/binance-testnet.ts",
+    "src/bot.ts",
+    "src/exchange.ts",
+    "src/observed-execution-venue.ts",
+    "src/order-tracker.ts",
+    "src/reconciliation.ts",
+    "src/risk.ts",
+    "src/runtime-paths.ts",
+    "src/state-store.ts",
+    "src/types.ts"
+  ]
+}

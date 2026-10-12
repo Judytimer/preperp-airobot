@@ -3,6 +3,8 @@
 日期：2026-10-02  
 状态：**本阶段收尾；下一阶段只做冻结协议后的 prospective sampling**
 
+> **2026-10-04 Scope 纠偏：** 本文冻结的是首个 Crypto-FDV Variant 的方法与证据协议，不定义整个 Strategy Thesis。Meme、FDV、Binance Spot 与 Polymarket FDV 都属于当前具体 Variant / Formal Batch 的边界。上层研究命题现明确为 `Cross-Market Repricing Lag`；v2.1 继续冻结，不因上层概念变宽而回改。详见 [策略边界纠偏说明](strategy-thesis-boundary-correction.md)。
+
 ## 1. 这轮真正闭合的东西
 
 Strategy 没有为了历史案例改参数或改语义。
@@ -109,6 +111,8 @@ Frozen protocol
 
 ## 6. Prospective sampling 的最小记录
 
+补充：本收尾文档中的 v1 listing baseline 保留为历史方法记录。v1 未产生正式 prospective sample；短暂设计的 v2.0 也未产生样本，已在投入采样前由 `v2.1.0` 取代。当前 batch 允许已经在 Binance Spot 上线的加密资产，以归档的 Polymarket Gamma `firstDiscoveredAt` 后第一根完整 1m candle 为 baseline；`market.openedAt` 只作为证据字段。详见 [v2.1 manifest](prospective-manifest-v2.md)。
+
 每个未来观察点至少保存：
 
 ```text
@@ -135,7 +139,67 @@ outcome rule / outcome window
 
 > 我最初用逐笔数据回放 PENGU 时得到了 Candidate，但换成 1 分钟闭合 K 线后 Candidate 消失。这个 failure 让我意识到策略 admission 对 microstructure cadence 敏感，所以我没有调 Strategy 去迁就案例，而是把 cadence、baseline、历史 YES 对齐方式和 no-future-data 规则冻结成可执行协议。PENGU 最终保留为方法诊断，不包装成 alpha；后续证据改用 freeze 后的 prospective sampling。
 
-## 8. Stop Rule
+## 8. Execution Realism Audit
+
+这次收尾额外审查 `Observation → Execution → Fill → PnL`，不修改 Strategy、Risk、Position Model 或 AI Shadow。审查结论不是“补一套交易所撮合引擎”，而是把假设分到正确层级。
+
+### 8.1 Must Fix（本轮已闭合）
+
+| 假设 | 当前处理 | 验证边界 |
+| --- | --- | --- |
+| observation price = fill price | Overlay paper execution 显式记录 `referencePrice`、`fillPrice`、`slippageBps`；支持固定 adverse bps stress（BUY 上调、SELL 下调） | 固定 bps 不是 order-book/VWAP 模型，只用于敏感性检查 |
+| 时间戳泄漏 | Formal adapter 只取 `YES observedAt <= snapshot.ts`，并把 `yesPriceObservedAt` 留在 snapshot；spot 使用该 snapshot 的闭合 K 线，FDV 同点派生 | 不插值、不向未来取值；供应量来源及其核验时间仍须随 prospective artifact 保存 |
+| sampling protocol 不正式 | `v1.0.0` 冻结 1m fully-closed cadence、baseline 和 latest-known 对齐规则 | 修改规则必须升 protocol version 或重启 batch |
+
+Paper execution 同时留下：
+
+```text
+signalAt → submitAt → fillAt
+referencePrice → fixed-bps stress → fillPrice
+feeModel = ZERO (explicit)
+```
+
+Prospective batch 的 execution assumptions 已冻结为 `v1.0.0`：主报告使用双向不利 `50 bps`，同时保存 `0 / 100 bps` 敏感性对照；fee 显式为零，fill 明示为全量成交限制。修改这些数值必须切换 assumption version / batch，不能回改已经落盘的 observation。
+
+BUY 场景按不利滑点后的 `fillPrice` 计算可买份额，而不是先按 observation price 用满预算后再把成交价抬高；因此滑点会降低 shares 并进入 Position/PnL，同时实际 entry premium 仍不超过冻结的 `maxRiskBudget`。SELL 场景同样以不利 `fillPrice` 进入已实现 PnL。
+
+这里的 `feeModel = ZERO` 是公开假设，不代表任何 prediction venue 实际免手续费。进入指定 venue 验证前，必须换成该 venue 的 entry / exit / network fee 规则。
+
+### 8.2 Known Limitation（记录，不在本轮伪造精度）
+
+| 假设 | 为什么会偏乐观 | 当前边界 |
+| --- | --- | --- |
+| Exit liquidity / market impact | SELL 可能没有足够 bid，且高波动时 bid 会移动 | 没有历史盘口；不宣称退出价可真实获得 |
+| Latency realism | 当前 wall-clock timestamp chain 可观测，但不模拟 decision / network / venue latency | 不把本地 `fillDelayMs` 包装成真实网络模型 |
+| Infinite depth | 固定 bps 对任意 qty 给出完整成交 | `maxRiskBudget` 限制规模，但不是深度证明 |
+| Partial fill | Overlay 当前按一次完整 paper fill 收敛 | Trading Core 已有 partial-fill execution contract；Overlay 尚未接入同等级的 remaining-qty lifecycle，不能声称已复用完成 |
+| Fee realism | 不同 prediction market / DEX / CEX 费用结构不同 | 当前显式为零并进入 execution record，不再静默继承永续模拟器费率 |
+
+因此，当前结果允许表达为“在固定 bps、零 fee、全量成交的 paper stress 下的 PnL”，不能表达为可成交的真实 venue PnL。
+
+### 8.3 Future Trigger（满足条件才升级）
+
+出现下列任一信号时，再升级 execution model：
+
+- Candidate 数量增长，使 execution error 足以影响 aggregate conclusion；
+- prospective sampling 开始连接一个明确的 prediction venue；
+- sensitivity analysis 显示 spread / latency / depth 是主要结果风险；
+- position size 接近可见盘口深度，或出现 exit / partial-fill failure。
+
+升级顺序为：保存历史 best bid/ask 与 depth → side-aware reference price → VWAP / partial fills → venue fee → latency stress。不得在没有盘口 artifact 时制造“高精度” market-impact 参数。
+
+### 8.4 收尾检查清单
+
+每个 prospective Candidate 在进入 outcome evaluation 前检查：
+
+- [ ] spot、YES、FDV 的 source timestamp 均不晚于 `snapshot.ts`；
+- [ ] `referencePrice` 与 `fillPrice` 分开保存；
+- [ ] `slippageBps` 与 fee model 明示；
+- [ ] `signalAt <= submitAt <= fillAt`；
+- [ ] full-fill、zero-latency、infinite-depth 等未实现能力只列为 limitation；
+- [ ] 如果更换 protocol 或 execution assumption，切版本 / batch，不回改已知 outcome。
+
+## 9. Stop Rule
 
 本阶段不再因为“看起来更完整”继续增加功能。
 

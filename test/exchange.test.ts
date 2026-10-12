@@ -31,7 +31,7 @@ test("client identity exists before the venue assigns its identity", async () =>
   assert.equal(seen[1]?.type === "FILL" && seen[1].fill.clientOrderId, submitted.clientOrderId);
 });
 
-test("cancel acknowledgment is an event and suppresses an unexecuted fill", async () => {
+test("cancel terminal is an event and suppresses an unexecuted fill", async () => {
   const exchange = new SimulatedExchange(30);
   const events: ExecutionEvent[] = [];
   exchange.onExecutionEvent((event) => events.push(event));
@@ -40,7 +40,7 @@ test("cancel acknowledgment is an event and suppresses an unexecuted fill", asyn
   await exchange.requestCancel("CLIENT-1");
   await exchange.drain();
 
-  assert.deepEqual(events.map((event) => event.type), ["ORDER_ACK", "CANCEL_ACK"]);
+  assert.deepEqual(events.map((event) => event.type), ["ORDER_ACK", "ORDER_TERMINAL"]);
 });
 
 test("partial fill remains authoritative when cancel suppresses only the remainder", async () => {
@@ -54,7 +54,7 @@ test("partial fill remains authoritative when cancel suppresses only the remaind
   await exchange.requestCancel("CLIENT-1");
   await exchange.drain();
 
-  assert.deepEqual(events.map((event) => event.type), ["ORDER_ACK", "FILL", "CANCEL_ACK"]);
+  assert.deepEqual(events.map((event) => event.type), ["ORDER_ACK", "FILL", "ORDER_TERMINAL"]);
   assert.equal(events[1]?.type === "FILL" && events[1].fill.qty, 0.004);
 });
 

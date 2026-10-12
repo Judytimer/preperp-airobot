@@ -132,17 +132,23 @@ test("matches out-of-order fills to pending orders by orderId", async () => {
   const logs: string[] = [];
   const bot = makeBot({
     symbol: "BTC-PERP",
-    shortWindow: 2,
-    longWindow: 4,
+    signalSource: {
+      onTick: (marketTick: Tick) => ({
+        action: "LONG" as const,
+        targetQty: marketTick.seq === 1 ? 0.01 : 0.02,
+        shortMa: null,
+        longMa: null,
+        reason: "multi-order same-side target"
+      })
+    },
     orderQty: 0.01,
     maxAbsPosition: 0.03,
     fillDelayMs: (orderId: string) => (orderId === "SIM-1" ? 30 : 5),
     logger: (line) => logs.push(line)
   });
 
-  for (const [index, price] of [100, 101, 102, 103, 80].entries()) {
-    await bot.onTick(tick(index + 1, price));
-  }
+  await bot.onTick(tick(1, 100));
+  await bot.onTick(tick(2, 101));
 
   await drain(bot);
 
@@ -150,8 +156,106 @@ test("matches out-of-order fills to pending orders by orderId", async () => {
     .filter((line) => line.startsWith("[FILL]"))
     .map((line) => line.match(/exchangeOrderId=(SIM-\d+)/)?.[1]);
   assert.deepEqual(fillOrder, ["SIM-2", "SIM-1"]);
-  assert.equal(bot.getPosition().side, "SHORT");
+  assert.equal(bot.getPosition().side, "LONG");
+  assert.equal(bot.getPosition().qty, 0.02);
+});
+
+test("cancels conflicting entry orders before allowing a reduce-only exit", async () => {
+  const logs: string[] = [];
+  const bot = makeBot({
+    symbol: "BTC-PERP",
+    signalSource: {
+      onTick: (marketTick: Tick) => ({
+        action: marketTick.seq === 1 ? "LONG" as const : "FLAT" as const,
+        shortMa: null,
+        longMa: null,
+        reason: "target changed while entry was pending"
+      })
+    },
+    orderQty: 0.01,
+    maxAbsPosition: 0.03,
+    fillDelayMs: 30,
+    logger: (line) => logs.push(line)
+  });
+
+  await bot.onTick(tick(1, 100));
+  await bot.onTick(tick(2, 99));
+  await bot.onTick(tick(3, 98));
+  await drain(bot);
+
+  assert.equal(logs.filter((line) => line.startsWith("[ACK]")).length, 1);
+  assert.equal(logs.filter((line) => line.startsWith("[FILL]")).length, 0);
+  assert.match(logs.join("\n"), /\[ORDER_COORDINATOR\].*canceling 1 conflicting/);
+  assert.match(logs.join("\n"), /\[ORDER_TERMINAL\].*status=CANCELED/);
+  assert.equal(bot.getPosition().side, "FLAT");
+  assert.equal(bot.getOpenOrders().length, 0);
+});
+
+test("accepts a terminal fill as authoritative when the racing cancel command reports an error", async () => {
+  const venue = new FillWinsCancelVenue();
+  const bot = new PerpBot({
+    symbol: "BTC-PERP",
+    signalSource: {
+      onTick: (marketTick: Tick) => ({
+        action: marketTick.seq === 1 ? "LONG" as const : "FLAT" as const,
+        shortMa: null,
+        longMa: null,
+        reason: "fill wins cancel race"
+      })
+    },
+    orderQty: 0.01,
+    maxAbsPosition: 0.03,
+    venue,
+    logger: () => {}
+  });
+
+  await bot.onTick(tick(1, 100));
+  await bot.onTick(tick(2, 99));
+  assert.equal(bot.getPosition().side, "LONG");
+  assert.equal(bot.getOpenOrders().length, 0);
+
+  await bot.onTick(tick(3, 98));
+  assert.equal(venue.submissions.length, 2);
+  assert.equal(venue.submissions[1]?.request.reduceOnly, true);
+  assert.equal(bot.getPosition().side, "FLAT");
+  assert.equal(bot.getOpenOrders().length, 0);
+});
+
+test("converges multiple conflicting orders with mixed cancel and fill outcomes before exiting", async () => {
+  const venue = new MixedCancelOutcomesVenue();
+  const bot = new PerpBot({
+    symbol: "BTC-PERP",
+    signalSource: {
+      onTick: (marketTick: Tick) => ({
+        action: marketTick.seq <= 2 ? "LONG" as const : "FLAT" as const,
+        ...(marketTick.seq <= 2 ? { targetQty: marketTick.seq * 0.01 } : {}),
+        shortMa: null,
+        longMa: null,
+        reason: "multi-order mixed cancel race"
+      })
+    },
+    orderQty: 0.01,
+    maxAbsPosition: 0.03,
+    venue,
+    logger: () => {}
+  });
+
+  await bot.onTick(tick(1, 100));
+  await bot.onTick(tick(2, 101));
+  assert.equal(bot.getOpenOrders().length, 2);
+
+  await bot.onTick(tick(3, 99));
+  assert.equal(venue.cancelRequests.length, 2);
+  assert.equal(bot.getPosition().side, "LONG");
   assert.equal(bot.getPosition().qty, 0.01);
+  assert.equal(bot.getOpenOrders().length, 0);
+
+  await bot.onTick(tick(4, 98));
+  assert.equal(venue.submissions.length, 3);
+  assert.equal(venue.submissions[2]?.request.side, "SELL");
+  assert.equal(venue.submissions[2]?.request.qty, 0.01);
+  assert.equal(venue.submissions[2]?.request.reduceOnly, true);
+  assert.equal(bot.getPosition().side, "FLAT");
 });
 
 test("keeps remaining exposure pending until all partial fills complete", async () => {
@@ -179,8 +283,8 @@ test("keeps remaining exposure pending until all partial fills complete", async 
   await drain(bot);
 
   assert.equal(logs.filter((line) => line.startsWith("[ACK]")).length, 1);
-  assert.match(logs.join("\n"), /status=PARTIALLY_FILLED filled=0\.004 remaining=0\.006/);
-  assert.match(logs.join("\n"), /status=FILLED filled=0\.01 remaining=0/);
+  assert.match(logs.join("\n"), /status=PARTIALLY_FILLED.*filled=0\.004 remaining=0\.006/);
+  assert.match(logs.join("\n"), /status=FILLED.*filled=0\.01 remaining=0/);
   assert.match(logs.join("\n"), /filled=0\.004 pending=0\.006 projected=0\.01/);
   assert.equal(bot.getPosition().side, "LONG");
   assert.equal(bot.getPosition().qty, 0.01);
@@ -259,9 +363,9 @@ test("exchange-confirmed cancel prevents the ghost fill after liquidation", asyn
   );
   const ackIndex = trace.findIndex((line) => line.startsWith("[ACK] clientOrderId=BTC-PERP-2"));
   const cancelRequestedIndex = trace.findIndex(
-    (line) => line.includes("clientOrderId=BTC-PERP-2") && line.includes("status=CANCEL_REQUESTED")
+    (line) => line.includes("clientOrderId=BTC-PERP-2") && line.includes("cancelRequested=true")
   );
-  const cancelAckIndex = trace.findIndex((line) => line.startsWith("[CANCEL_ACK] clientOrderId=BTC-PERP-2"));
+  const cancelAckIndex = trace.findIndex((line) => line.startsWith("[ORDER_TERMINAL] clientOrderId=BTC-PERP-2"));
   const canceledIndex = trace.findIndex(
     (line) => line.startsWith("[ORDER]") && line.includes("clientOrderId=BTC-PERP-2") && line.includes("status=CANCELED")
   );
@@ -486,6 +590,120 @@ class ManualAckVenue implements ExecutionVenue {
         exchangeOrderId,
         status: "ACKED",
         request: command.request,
+        ts: command.request.ts
+      }
+    });
+  }
+}
+
+class FillWinsCancelVenue implements ExecutionVenue {
+  readonly submissions: SubmitOrderCommand[] = [];
+  private handler: ExecutionEventHandler | undefined;
+
+  onExecutionEvent(handler: ExecutionEventHandler): void {
+    this.handler = handler;
+  }
+
+  async submit(command: SubmitOrderCommand): Promise<void> {
+    if (this.handler === undefined) throw new Error("execution handler is not registered");
+    this.submissions.push(structuredClone(command));
+    const exchangeOrderId = `RACE-${this.submissions.length}`;
+    await this.handler({
+      type: "ORDER_ACK",
+      ack: {
+        clientOrderId: command.clientOrderId,
+        exchangeOrderId,
+        status: "ACKED",
+        request: command.request,
+        ts: command.request.ts
+      }
+    });
+    if (this.submissions.length > 1) await this.publishFill(command, exchangeOrderId);
+  }
+
+  async requestCancel(clientOrderId: string): Promise<void> {
+    const command = this.submissions.find((item) => item.clientOrderId === clientOrderId);
+    if (command === undefined) throw new Error("unknown order");
+    await this.publishFill(command, "RACE-1");
+    throw new Error("cancel rejected because the order was already filled");
+  }
+
+  private async publishFill(command: SubmitOrderCommand, exchangeOrderId: string): Promise<void> {
+    if (this.handler === undefined) throw new Error("execution handler is not registered");
+    await this.handler({
+      type: "FILL",
+      fill: {
+        fillId: `${exchangeOrderId}-FILL`,
+        clientOrderId: command.clientOrderId,
+        exchangeOrderId,
+        symbol: command.request.symbol,
+        side: command.request.side,
+        qty: command.request.qty,
+        price: command.request.price,
+        fee: 0,
+        ts: command.request.ts
+      }
+    });
+  }
+}
+
+class MixedCancelOutcomesVenue implements ExecutionVenue {
+  readonly submissions: SubmitOrderCommand[] = [];
+  readonly cancelRequests: string[] = [];
+  private handler: ExecutionEventHandler | undefined;
+
+  onExecutionEvent(handler: ExecutionEventHandler): void {
+    this.handler = handler;
+  }
+
+  async submit(command: SubmitOrderCommand): Promise<void> {
+    if (this.handler === undefined) throw new Error("execution handler is not registered");
+    this.submissions.push(structuredClone(command));
+    const exchangeOrderId = `MIXED-${this.submissions.length}`;
+    await this.handler({
+      type: "ORDER_ACK",
+      ack: {
+        clientOrderId: command.clientOrderId,
+        exchangeOrderId,
+        status: "ACKED",
+        request: command.request,
+        ts: command.request.ts
+      }
+    });
+    if (command.request.side === "SELL") await this.publishFill(command, exchangeOrderId);
+  }
+
+  async requestCancel(clientOrderId: string): Promise<void> {
+    if (this.handler === undefined) throw new Error("execution handler is not registered");
+    this.cancelRequests.push(clientOrderId);
+    const index = this.submissions.findIndex((item) => item.clientOrderId === clientOrderId);
+    const command = this.submissions[index];
+    if (command === undefined) throw new Error("unknown order");
+    const exchangeOrderId = `MIXED-${index + 1}`;
+    if (index === 0) {
+      await this.handler({
+        type: "ORDER_TERMINAL",
+        terminal: { clientOrderId, exchangeOrderId, status: "CANCELED", ts: command.request.ts }
+      });
+      return;
+    }
+    await this.publishFill(command, exchangeOrderId);
+    throw new Error("cancel lost the race to a fill");
+  }
+
+  private async publishFill(command: SubmitOrderCommand, exchangeOrderId: string): Promise<void> {
+    if (this.handler === undefined) throw new Error("execution handler is not registered");
+    await this.handler({
+      type: "FILL",
+      fill: {
+        fillId: `${exchangeOrderId}-FILL`,
+        clientOrderId: command.clientOrderId,
+        exchangeOrderId,
+        symbol: command.request.symbol,
+        side: command.request.side,
+        qty: command.request.qty,
+        price: command.request.price,
+        fee: 0,
         ts: command.request.ts
       }
     });

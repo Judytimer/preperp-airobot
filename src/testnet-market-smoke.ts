@@ -1,9 +1,10 @@
-import { BinanceUsdsTestnetMarketFeed } from "./binance-testnet.ts";
+import { BinanceUsdsMarketFeed } from "./binance-testnet.ts";
 import { formatTick } from "./logging.ts";
 
-const feed = new BinanceUsdsTestnetMarketFeed({
+const feed = new BinanceUsdsMarketFeed({
   canonicalSymbol: "BTC-PERP",
-  venueSymbol: "BTCUSDT"
+  venueSymbol: "BTCUSDT",
+  environment: "TESTNET"
 });
 
 let seen = 0;

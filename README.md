@@ -1,532 +1,405 @@
-# Monad / Perpl 永续合约执行实验
+# PrePerp
 
-> 基于现有永续合约交易核心（Perp Trading Core），验证自动交易系统从 CEX 迁移到 Monad / Perpl 后，执行语义（Execution Semantics）、恢复（Recovery）与对账（Reconciliation）如何变化。
+**Evidence-first prediction-market research and perpetual-futures execution system**
 
-这个分支不是新的量化机器人，也不是为了 Monad 重写策略（Strategy）。
+PrePerp 持续采集 Polymarket 与 Binance 的真实公开数据，由确定性规则生成 prospective Candidate，再通过 Risk、订单生命周期和权威 reconciliation，在 Binance Futures Testnet 完成一次性自动交易闭环。Monad 分支在同一套 Trading Core 上增加了 Perpl 链上 readiness 与 EVM 交易状态层，不重写策略或桌面运行时。中文 Tauri 桌面端负责观察和监督，本地 Laya 只做 Shadow Review，没有下单权。
 
-它要验证的是：
+> 这是一套交易工程与研究证据系统，不是盈利宣传，也不是已获授权的实盘机器人。
+
+快速入口：[Monad 链路](#monad--perpl-适配) · [运行与验证](#快速运行) · [系统架构](#系统如何工作) · [真钱边界](#mainnet-微额真钱闭环) · [桌面端](desktop/README.md) · [完整文档](docs/README.md)
+
+## 当前状态
+
+| 能力 | 状态 |
+|---|---|
+| Paper execution core | `COMPLETE` |
+| Binance Futures Testnet 基础闭环 | `PASS` |
+| MA strategy → Testnet | `PASS` |
+| Prediction Candidate → Testnet | `PASS` |
+| 中文桌面控制台 | `AVAILABLE` |
+| Monad Testnet RPC / Perpl contract readiness | `PASS / OBSERVE_ONLY` |
+| Monad transaction lifecycle | `IMPLEMENTED / NO SIGNER` |
+| Mainnet / Micro-Capital | `IMPLEMENTED / NOT YET EXECUTED` |
+| 可持续 alpha | `NOT CLAIMED` |
+| 最新全量测试 | `200 PASS / 0 FAIL / 2 SKIP` |
+
+当前工程结论很明确：执行真实性已经从 Paper 推进到认证 Testnet，并具备受限 Mainnet 微额闭环代码；盈利能力仍需依靠多笔、前瞻、不可回填的真钱样本验证，不能由一次 Testnet 或一次主网往返推出。
+
+## Monad / Perpl 适配
+
+Monad 分支保留 Strategy、Risk、OrderTracker、PositionBook、checkpoint、Recovery 和 Reconciliation，只增加两个边界：
 
 ```text
-Existing Perp Trading Core
-        ↓
-Perpl / Monad Adapter
-        ↓
-DEX Execution Semantics
-        ↓
-Failure / Recovery / Reconciliation
+Perpl protocol facts                 Monad transaction facts
+Order Update / WalletFill            nonce / simulation / txHash
+orders / positions snapshots         receipt / revert / finalized
+            │                                  │
+            └────────── correlation ───────────┘
+                               │
+                    existing Trading Core
 ```
 
-核心问题只有一个：
+二者不能合并：交易 receipt 成功不等于订单 ACK，更不等于成交。当前已实现并测试 Monad JSON-RPC、chain ID 与 Perpl 合约代码探测、外部 signer 边界、持久化 nonce/transaction journal、同钱包并发串行、revert/unknown/finality 状态，以及桌面只读状态卡。尚未配置钱包、抵押品或 Perpl API key，因此没有声称完成真实 Perpl 订单闭环。
 
-> **当交易场所（Venue）从 CEX 变成 Monad 上的 Perp DEX 时，本地交易意图（Trading Intent）如何安全收敛为外部权威事实（Authoritative Trading Fact）？**
+只读探测不会签名、花 gas 或发交易：
 
----
-
-## 为什么做这个分支
-
-主项目已经围绕永续合约交易工程（Perpetual Futures Trading Engineering）建立了这些核心能力：
-
-- 订单生命周期（Order Lifecycle）
-- 订单身份（Order Identity）
-- 仓位 / 预计仓位（Position / Projected Position）
-- 确定性风控（Deterministic Risk）
-- 逐仓保证金（Isolated Margin）
-- 恢复（Recovery）
-- 对账（Reconciliation）
-- 外部权威事实来源（External Source of Truth）
-
-在 CEX 中，典型执行链可以概括为：
-
-```text
-Command
-→ ACK
-→ Fill
-→ Position
+```bash
+npm run monad:probe
 ```
 
-迁移到 Monad / Perpl 后，最先需要重新验证的不是策略，而是执行边界（Execution Boundary）：
+默认目标是 Monad testnet（chain ID `10143`）。真实执行仍需要少量 `MON` gas、Perpl 抵押品、exchange account，以及外部 signer 或 trade-scoped API key；切到链上不等于免费交易。完整设计与当前证据见 [Monad / Perpl 链上交易整合](docs/monad-chain-integration.md)。
+
+## 已跑通的 Prediction → Testnet 闭环
+
+系统已经从持续运行的真实数据中自动捕获一个新的 BTC 小时级 `DOWN` Candidate，而不是手工注入历史样本：
 
 ```text
-Trading Intent
-→ Protocol Request
-→ Order / Execution State
-→ Authoritative Venue Fact
-→ Local State Convergence
+Polymarket: Bitcoin Up or Down - October 8, 7PM ET
+
+hour open              81896.72
+previous 1m close      81926.00
+crossing 1m close      81896.01
+archived DOWN YES ask  0.44
+
+                 ↓ deterministic Candidate
+
+TESTNET_DEMO_ONLY SHORT BTCUSDT 0.001
+→ Exchange ACK
+→ SELL Fill @ 81898.6
+→ Position = SHORT 0.001
+→ deterministic reduce-only FLAT
+→ BUY Fill @ 81903.3
+→ authoritative Position = FLAT
+→ open orders = 0
+→ reconciliation PASS
 ```
 
-本分支将这个问题暂时概括为：
+本地账本记录手续费 `0.06552075` Testnet USDT，realized PnL 为 `-0.07022075`。盈亏不参与本次验收；这次运行证明的是自动化链路，而不是方向 alpha。
 
-## 意图—事实鸿沟（Intent–Fact Gap）
+详细供给、触发与边界记录见：[高流动性资产 × Prediction Market 供给审计](docs/research/high-liquidity-prediction-supply-2026-10-08.md)。
 
-> **发出了交易意图（Intent），不等于外部资金事实（Fact）已经按预期发生。**
-
-这只是本项目的设计命题（Design Thesis），不是行业标准术语。
-
----
-
-## 整体架构
-
-策略和 AI 继续主要运行在链下（Off-chain），Monad / Perpl 负责真实执行语义。
+## 系统如何工作
 
 ```text
-链下（Off-chain）
-────────────────────────────
+Polymarket Gamma / CLOB               Binance public market data
+             │                                   │
+             └───────────┬───────────────────────┘
+                         ▼
+              Prospective Watcher
+              raw archive + checksum
+                         │
+                         ▼
+              Deterministic Admission
+                         │
+                  QUALIFIED Candidate
+                         │
+             ┌───────────┴───────────┐
+             ▼                       ▼
+      Laya Shadow Review       TESTNET_DEMO_ONLY
+      evidence check only      same-asset mapping
+      no trading authority            │
+                                      ▼
+                              Risk → Perp Order
+                                      │
+                                      ▼
+                         Binance Futures Testnet
+                                      │
+                         ACK / Fill / Position
+                                      │
+                         deterministic FLAT
+                                      │
+                         authoritative reconciliation
 
-Strategy / Prediction Overlay
-AI Shadow
-Deterministic Risk
-Projected Position
-
-        ↓
-
-Trading Intent
-
-        ↓
-
-执行边界（Execution Boundary）
-────────────────────────────
-
-Perpl Adapter
-
-        ↓
-
-Monad / Perpl
-────────────────────────────
-
-Order
-Change
-Cancel
-Fill
-Position
-Margin
-Liquidation
-
-        ↓
-
-Authoritative State
-
-        ↓
-
-链下（Off-chain）
-────────────────────────────
-
-Order Tracker
-Position Mirror
-Recovery
-Reconciliation
+           全链路状态 → Tauri 中文桌面控制台
 ```
 
-AI Shadow 继续保持只读 / 研究边界（Review-only Boundary）：
-
-- 可以解释异常；
-- 可以分析执行证据（Execution Evidence）；
-- 不能直接拥有交易权限；
-- 不能替代协议事实（Protocol Fact）；
-- 不能直接决定恢复交易。
-
----
-
-## 哪些能力继续复用（KEEP）
-
-原则上继续复用主项目现有能力：
+核心边界是：
 
 ```text
-Strategy
-AI Shadow
-Deterministic Risk
-Position / Projected Position
-Isolated Margin
-Checkpoint
-Recovery
-Reconciliation
+AI judgment ≠ trading authority
+submit() ≠ ACK
+local state ≠ exchange fact
+Prediction direction mapping ≠ proven alpha
 ```
 
-这个分支的健康目标是：
+## 当前监控范围
+
+Prediction 监控分成两条独立 lane：
+
+| Lane | 当前资产 | 研究对象 |
+|---|---|---|
+| Daily Price-Target | BTC / ETH / SOL / XRP | 固定日期价格阈值合约 |
+| Hourly Up/Down | BTC / ETH / SOL / XRP / DOGE / HYPE / BNB / ADA / LINK / AVAX / SUI / LTC / BCH / DOT / TRX | Binance 1h candle 方向合约 |
+
+小时发现池已扩展到 15 个同时拥有 Binance Spot 与 USDⓈ-M Perp 的高流动性资产。当前 Polymarket 实时供给仍主要集中在原 7 个资产；新增 8 个只在真实同语义市场出现后才会注册 Candidate，不会因扩大列表伪造信号：
 
 ```text
-latest Trading Core
-+
-thin Monad / Perpl delta
+Polymarket 有相同语义的活跃合约
++ Binance 有明确的 resolution data
++ Binance Futures Testnet 有对应 USDT perpetual
 ```
 
-也就是：**尽量只增加 Monad / Perpl 必需的那一层，而不是重新长出第二套 Trading Core。**
+桌面端会把“已配置发现资产”和“当前确有 Prediction 市场的资产”分色显示。仅在 Binance 上成交活跃、但没有对应 Prediction contract 的资产，不会被伪造成策略信号。
 
----
-
-## 哪些地方必须变化（CHANGE）
-
-真正需要重新验证的是执行场所适配（Venue Adaptation）和身份映射（Identity Mapping）。
-
-### CEX 常见模型
+### 小时 Candidate 的确定性规则
 
 ```text
-clientOrderId
-→ submit
-→ ACK
-→ exchangeOrderId
-→ Fill
+UP:
+previous 1m close < hour open <= current closed 1m close
+
+DOWN:
+previous 1m close >= hour open > current closed 1m close
+
+AND
+corresponding pre-T0 YES book freshness <= 120s
+AND
+best executable ask <= 0.50
 ```
 
-### Perpl 当前接口语义
+未收盘 candle 会被忽略；缺少 pre-T0 book、时间边界或原始 artifact 时 fail closed。禁止 interpolation、未来数据和事后回填。
 
-Perpl 当前官方接口中：
+### 候选供给初测
 
 ```text
-rq
-= strictly increasing request ID
-= idempotency key
-
-sn
-= client-provided non-zero sequence
-→ echoed by server as cid
+审计快照：47 个小时 episode / 7 个资产 / 约 24h 上架窗口
+正式运行：43 个等待 episode，3 个当时活跃 episode
+武装后约 10 分钟：1 个 qualified Candidate
 ```
 
-因此本项目不会把内部的 `clientOrderId` 直接重命名成 `rq`。
+这证明供给不再像 FDV Variant 那样稀疏，但样本仍不足以外推稳定日频。长期密度应按 `qualified Candidates / monitored asset-hours` 统计，并同时报告 active episode 与 `DATA_BLOCKED` 数量。
 
-更合理的边界是：
+## 中文桌面控制台
+
+桌面端位于 [`desktop/`](desktop/README.md)，技术栈为：
 
 ```text
-Internal Trading Identity
-        ↓
-Perpl Adapter
-        ├─ rq
-        ├─ sn / cid
-        └─ protocol order identity
+Tauri 2
++ Rust local supervisor
++ React / TypeScript
++ TanStack Query
 ```
 
-也就是：
+它在同一界面显示：
 
-> **核心领域身份（Core Domain Identity）继续由 Trading Core 持有，Perpl Adapter 负责协议身份翻译（Venue Identity Mapping）。**
+- 日度 Price-Target watcher；
+- 小时 Up/Down watcher 与当前资产池；
+- 最新 Candidate、T0、方向和 YES ask；
+- 本地 Laya 服务与 Shadow Review；
+- Binance Testnet consumer 状态；
+- ACK、Fill、Position、FLAT 和 reconciliation 结果；
+- watcher / Laya 本地常驻与最后心跳；
+- Windows 登录后启动开关和“云端 AI = 0”边界；
+- 明确的 Mainnet / AI 权限边界。
 
----
+Renderer 不能执行任意 shell 命令，也不接收交易所密钥。Rust host 启动后独立监督唯一 watcher 与本地 Laya；关闭窗口只隐藏到系统托盘。Testnet 不随桌面启动或开机自启而重新武装。
 
-## 外部权威状态（External Source of Truth）
+## Testnet 安全边界
 
-这个分支不会为了“更 Web3”而自己重做完整链上状态机（Blockchain State Machine）。
+Prediction 驱动的 Testnet runner 必须满足：
 
-Perpl 已经提供认证后的 WebSocket 状态流（Authenticated WebSocket State Stream）。
+- Candidate 在 consumer 武装之后自动产生；
+- 不消费历史 Candidate 补单；
+- One-way mode；
+- 下单前 authoritative position 为 `FLAT`；
+- open orders 为 `0`；
+- 空仓时才允许切换为 Isolated；
+- 使用每个资产预冻结的极小测试数量；
+- 首个 entry Fill 后立即确定性退出；
+- 最终必须 `FLAT + no open orders + reconciliation consistent`；
+- 成功一次后自动停止。
 
-建立连接后可以获得：
+小时 `UP → LONG`、`DOWN → SHORT` 只属于 `TESTNET_DEMO_ONLY_V1`。它用于证明信号可以驱动执行系统，不进入 Stage A/B，不授权 Mainnet，也不声称 Prediction→Perp directional edge。
+
+## Mainnet 微额真钱闭环
+
+主网不是“测试网一盈利就自动放开”。测试网余额没有经济含义，只验证接口、订单状态机和对账。真钱阶段独立验证滑点、手续费、真实成交和操作可靠性；策略盈利仍需靠多笔前瞻样本判断。
+
+当前实现采用两阶段一次性授权：
 
 ```text
-WalletSnapshot
-OrdersSnapshot
-PositionsSnapshot
+prepare（只读）
+→ 核验全账户空仓、零挂单、One-way、Isolated、单资产保证金
+→ 核验交易规则、数量、名义金额和可用余额
+→ 生成 10 分钟过期、SHA-256 内容寻址的 planId
+
+execute（真钱）
+→ 必须同时提供精确 planId + EXECUTE_REAL_MONEY_ONCE:<planId>
+→ 再次核验账户、价格和 Binance 历史订单（最大漂移 100 bps）
+→ user stream 就绪后再次核验全账户，再创建不可重复执行锁
+→ 1× 杠杆、下单前 `quantity × lastPrice ≤ 25 USDT`、一次 MARKET entry
+→ entry 的实际成交量大于零后立即发出 reduce-only MARKET FLAT；余量终止时按真实持仓补齐退出
+→ 最终要求本地与 Binance 都 FLAT、零挂单、reconciliation consistent
 ```
 
-后续通过：
+`.env` 必须由操作者显式填写，仓库不会提供真钱默认值：
 
-```text
-Command Status
-Order Updates
-WalletFills
+```dotenv
+BINANCE_MAINNET_API_KEY=...
+BINANCE_MAINNET_API_SECRET=...
+PREPERP_MICRO_SYMBOL=...
+PREPERP_MICRO_SIDE=LONG_or_SHORT
+PREPERP_MICRO_QUANTITY=...
+PREPERP_MICRO_MAX_NOTIONAL_USDT=...
 ```
 
-持续维护交易状态。
+API key 应只启用 Futures 交易、禁用提现并绑定 IP。plan 会冻结 commit 与关键执行源码的 SHA-256 指纹，Prepare 之后源码发生变化就拒绝执行。先运行 `npm run mainnet:micro:prepare`，人工核对输出的 plan 后，再设置 `PREPERP_MAINNET_PLAN_ID=<planId>` 与 `PREPERP_MAINNET_ARM=EXECUTE_REAL_MONEY_ONCE:<planId>`，最后运行 `npm run mainnet:micro:execute`。本地锁与 plan 专属 clientOrderId/交易所历史检查共同阻止重放；任何已消费授权都不会自动重试。
 
-因此第一阶段主要使用：
+费用按 Binance 返回的资产分别汇总；只有全部费用都能按 USDT 解释时才给出 `netPnlUsdt`，否则明确返回 `null`，避免把 BNB 等手续费误当 USDT。当前代码和确定性仿真已验证该闭环，但尚未提交任何主网订单。
 
-```text
-Perpl Snapshots
-+
-Order Updates
-+
-Fills
-        ↓
-Local Mirror
-        ↓
-Reconciliation
-```
+完整边界与设计分类见：[Mainnet Micro-Capital v1](docs/research/mainnet-micro-capital-v1.md)。
 
-原始交易回执 / 终局性引擎（Raw Transaction / Finality Engine）暂不进入第一阶段。
+## 交易执行核心
 
----
-
-## 第一条真实故障（First Real Failure）
-
-本分支不为了“增加难度”人为制造复杂系统。
-
-第一阶段只验证一个 Perpl 官方已经公开记录的 Monad 特有执行问题（Monad-specific Execution Failure）：
+底层执行路径覆盖：
 
 ```text
-Cancel
-        ↓
-separate Post transaction
-        ↓
-cancel 对应的 margin release 尚未完成
-        ↓
-new Post 做 balance / margin check
-        ↓
-AmountExceedsAvailableBalance
-```
-
-Perpl 官方开发建议明确指出：
-
-- 分开的 `Cancel → Post`（two transactions）是脆弱模式；
-- 问题不是简单“多等一会儿”（wait longer）；
-- 更优方向是修改订单（`Change`）；
-- 如果必须 cancel + post，应放在同一笔交易（same transaction / batch）中。
-
-这个 Failure 的价值不在于“Monad 很复杂”，而在于它直接检验：
-
-> **Trading Core 会不会错误地把“已经发出 Cancel”当成“保证金已经释放、旧订单已经消失”。**
-
----
-
-## 与主项目的关系
-
-这个问题与主项目长期研究的以下主题属于同一条业务主线：
-
-```text
-Ghost Order
-Cancel / Fill Race
-Order Identity
-Projected Position
-Recovery
-Reconciliation
-External Source of Truth
-```
-
-区别在于：
-
-```text
-CEX
-→ exchange-side execution uncertainty
-
-Monad / DEX
-→ protocol / asynchronous execution uncertainty
-```
-
-所以 Monad 分支不是离开永续合约交易开发去“重新学 Web3”。
-
-它是在同一套 Perp Trading Core 上验证：
-
-> **交易场所发生变化以后，哪些业务不变量（Invariant）仍然成立。**
-
----
-
-## 保证金（Margin）
-
-当前继续使用逐仓保证金（Isolated Margin）。
-
-Perpl 当前官方文档明确采用 isolated margin：
-
-- 每个仓位（Position）有自己的保证金；
-- 账户空闲余额不会自动为其他仓位补充保证金；
-- 当前没有已确认上线的 Cross Margin。
-
-因此：
-
-```text
-KEEP Isolated Margin
-DEFER Cross Margin
-```
-
-只有未来接入真实使用全仓保证金（Cross Margin）的 Venue 时，才让真实协议差异推动新的抽象。
-
----
-
-## 第一阶段里程碑（First Milestone）
-
-第一阶段不追求完整 DEX Trading Platform。
-
-只完成：
-
-```text
-1. Perpl authentication / connection
-
-2. Internal identity
-   ↔ rq / sn / cid / protocol identity mapping
-
-3. Initial snapshots
-
-4. One real Order Lifecycle
-
-5. Cancel → independent Post failure
-
-6. Change / atomic operation comparison
-
-7. Recovery / Reconciliation
-```
-
-成功标准不是代码量，而是完整证明一次：
-
-```text
-Intent
-→ Execution
-→ Failure
-→ Safe Halt
-→ Authoritative Evidence
+Market
+→ Strategy / Candidate Signal
+→ Risk
+→ Submit Command
+→ Exchange ACK
+→ Partial Fill / Fill
+→ Position / Margin
+→ Checkpoint
+→ Restart / Recovery Boundary
 → Reconciliation
 ```
 
----
+已经实现并测试：
 
-## Demo 叙事
+- command 与 exchange fact 分离；
+- 多张并发订单、乱序 ACK/Fill、Partial Fill、delayed Fill 与 fillId 幂等；
+- cancel intent 与订单状态正交；冲突 entry 会全部确认终止后，才允许 reduce-only exit；
+- `CANCELED / EXPIRED / EXPIRED_IN_MATCH / REJECTED` 统一进入权威终态；
+- Late Fill 对终态账本的权威修正；
+- filled position + unresolved order 的 projected exposure；
+- cross-zero position；
+- isolated margin、mark price、maintenance margin；
+- fee、funding 与 realized PnL；
+- checkpoint、restart 与 `RECOVERY_REQUIRED`；
+- unknown submit result 禁止盲目 retry；
+- local / exchange position 与 open-order reconciliation。
 
-Hackathon Demo 不重点展示：
+典型案例：[CancelAck 后 Late Fill](docs/cases/order-tracker-late-fill.md)。
 
-- 复杂 K 线 UI；
-- 新交易策略；
-- AI 猜涨跌；
-- 完整交易终端。
+## 快速运行
 
-重点展示：
+要求：
 
-```text
-Trading Intent created
-        ↓
-Execution enters uncertain state
-        ↓
-Local system refuses to invent venue truth
-        ↓
-Risk expansion is stopped
-        ↓
-Perpl authoritative state arrives
-        ↓
-Reconciliation
-        ↓
-Trading Core returns to a known-safe state
+- Node.js `>= 22.12`
+- npm
+- Rust toolchain（仅桌面端需要）
+- Binance Futures Testnet API credentials（仅认证 Testnet 需要）
+
+安装与测试：
+
+```bash
+npm ci
+npm run desktop:install
+npm run typecheck
+npm test
+npm run desktop:check
 ```
 
-核心问题是：
+核心 Node 测试不要求交易所凭证。当前 Windows 环境的最新结果为 202 项测试：200 通过、0 失败、2 项因缺少 POSIX Bash 跳过。
 
-> **自动交易系统如何避免把自己的意图（Intent）错当成资金事实（Financial Fact）。**
+启动中文桌面控制台：
 
----
-
-## AI Shadow 的角色
-
-AI 在这个分支里可以读取：
-
-```text
-Execution Trace
-Position
-Margin
-Protocol Evidence
-Reconciliation Report
+```bash
+npm run desktop:dev
 ```
 
-并解释：
+构建 Windows 安装程序：
 
-- 为什么系统进入暂停（HALT）；
-- 哪个业务不变量（Invariant）被破坏；
-- 当前是否存在未解决风险敞口（Unresolved Exposure）；
-- 还缺什么执行证据（Execution Evidence）。
-
-但：
-
-```text
-ALLOW
-HALT
-RECOVERY_REQUIRED
+```bash
+npm run desktop:build
 ```
 
-仍由确定性规则（Deterministic Rules）和协议事实（Protocol Facts）决定。
+NSIS 安装程序输出到 `desktop/src-tauri/target/release/bundle/nsis/`。安装后可直接从 Windows 开始菜单启动，不需要 Codex。开机启动默认关闭，可在控制台中显式开启。
 
-一句话：
+CLI 模式持续采集：
 
-> **AI 负责调查（Investigate），协议事实负责裁决（Decide）。**
-
----
-
-## Monad Metropolis 定位
-
-这个项目不把自己描述成：
-
-> AI Trading Bot on Monad
-
-当前更准确的定位是：
-
-> **在 Monad 上验证自动化永续合约交易的执行安全（Execution Safety），并使用 Perpl 作为真实协议场景。**
-
-更进一步的叙事是：
-
-```text
-AI / Strategy
-creates Intent
-
-Monad
-executes finance at high speed
-
-Trading Core
-must safely converge Intent
-into verifiable financial Fact
+```bash
+npm run price-target:watch
 ```
 
-“通用自主金融基础设施（Autonomous Finance Infrastructure）”目前仍然只是愿景，不是已经完成的产品能力。
+该入口同时运行 Daily Price-Target 与 Hourly Up/Down，保持唯一 evidence writer。
 
----
+在另一个终端武装一次性 Prediction Testnet consumer：
 
-## 范围边界（Scope）
-
-### 本阶段包含（In Scope）
-
-```text
-Perpl Adapter
-Identity Mapping
-Order Lifecycle
-Execution Failure
-State Snapshot
-Recovery
-Reconciliation
-Minimal Demo
+```bash
+npm run smoke:prediction:testnet
 ```
 
-### 本阶段暂缓（DEFER）
+认证 Testnet 使用本地 `.env`，不要提交凭证：
 
 ```text
-Cross Margin
-Multi-DEX Framework
-Raw Finality Engine
-New Strategy
-Complex Frontend
-Generic Agent Platform
-MCP / Multi-Agent Orchestration
-Event Sourcing Rewrite
+BINANCE_TESTNET_API_KEY=...
+BINANCE_TESTNET_API_SECRET=...
 ```
 
-原则：
+其他入口：
 
-> **没有真实 Failure 或协议约束，就不增加复杂度。**
+| Command | Purpose |
+|---|---|
+| `npm run demo` | 核心订单生命周期演示 |
+| `npm run validate:perp` | Paper perp round trip |
+| `npm run validate:perp:testnet` | 认证 Testnet connectivity validation |
+| `npm run testnet` | MA strategy Testnet smoke |
+| `npm run laya:review:next` | 运行下一条只读 Laya Shadow Review |
+| `npm run testnet:market` | 只读 Testnet market smoke |
+| `npm run mainnet:micro:prepare` | 只读生成、校验微额主网 plan；不发订单 |
+| `npm run mainnet:micro:execute` | 需要 plan 专属人工授权的真钱往返 |
+| `npm run monad:probe` | 只读验证 Monad chain ID、最新区块、Perpl 合约代码与可选钱包余额/nonce |
 
----
-
-## 当前状态（Current Status）
-
-已完成：
+## 关键代码
 
 ```text
-✓ hackathon/monad branch
-✓ Monad / Perpl 方向冻结
-✓ Perpl API / WebSocket 事实核查
-✓ Isolated Margin 语义核查
-✓ rq / sn / cid 身份语义核查
-✓ authoritative snapshot 路径核查
-✓ Cancel → Post Failure 官方证据核查
+src/
+├─ bot.ts                              execution orchestration
+├─ risk.ts                             deterministic risk boundary
+├─ order-tracker.ts                    ACK / Fill / terminal lifecycle
+├─ position.ts                         position and realized PnL
+├─ reconciliation.ts                   local vs exchange truth
+├─ binance-testnet.ts                  Binance USDⓈ-M venue adapter
+├─ mainnet-micro.ts                    capped two-phase Mainnet protocol
+├─ monad/                              RPC readiness and EVM transaction truth
+├─ observed-execution-venue.ts         post-processing evidence observer
+├─ overlay/
+│  ├─ price-target-collector.ts        daily watcher entry
+│  ├─ hourly-up-down-collector.ts      15-asset hourly discovery lane
+│  ├─ prospective-testnet-demo.ts      one-shot Candidate consumer
+│  └─ laya-candidate-review.ts         read-only AI shadow
+└─ observability/domain-event.ts       append-only runtime events
+
+desktop/
+├─ src/overview.tsx                    Chinese control room
+├─ src/system-status.ts                typed desktop status
+└─ src-tauri/src/lib.rs                local supervisor and IPC boundary
 ```
 
-下一阶段：
+## 深入阅读
 
-```text
-Perpl Integration Reality Check
-        ↓
-Minimal Adapter
-        ↓
-One Order Lifecycle
-```
+1. [项目文档索引](docs/README.md)
+2. [交易系统设计决策](docs/architecture/design-decisions.md)
+3. [Perp execution validation](docs/cases/perp-execution-validation.md)
+4. [Order Tracker Late Fill](docs/cases/order-tracker-late-fill.md)
+5. [高流动性 Prediction 供给审计](docs/research/high-liquidity-prediction-supply-2026-10-08.md)
+6. [Price-Target Admission v1.1](docs/research/price-target-variant-admission-v1.1.md)
+7. [Mainnet Micro-Capital v1](docs/research/mainnet-micro-capital-v1.md)
+8. [面试复盘入口](docs/interview/README.md)
 
----
+## 明确不声称
 
-## 参考资料（References）
+PrePerp 当前不声称：
 
-- [Perpl Developer Docs](https://docs.perpl.xyz/)
-- [Perpl API Docs](https://github.com/PerplFoundation/api-docs)
-- [Monad Developer Docs](https://docs.monad.xyz/)
-- [Monad Metropolis](https://monad.xyz/metropolis)
+- 已证明可持续盈利；
+- 一次 Testnet DOWN smoke 证明方向 alpha；
+- 生产级 7×24 Mainnet 自动交易；
+- AI 可以控制 Risk 或下单；
+- 完整自动 recovery convergence；
+- 机构级 HA、风控或清算能力。
 
----
+项目真正证明的是：
 
-## 一句话
-
-> **把交易智能（Trading Intelligence）留在链下，把执行适配到 Perpl，并证明机器人永远不会把自己的交易意图（Intent）误认为外部权威资金事实（Authoritative Financial Fact）。**
+> 从真实 prospective 数据、不可变 evidence 和确定性 Candidate 开始，研究信号可以在不放大 AI 权限的前提下，安全驱动一条可观察、可复算、失败即关闭的交易闭环；当前已验证到 Testnet，Mainnet 微额协议仍等待首次人工授权执行。

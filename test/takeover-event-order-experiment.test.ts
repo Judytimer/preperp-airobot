@@ -2,19 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { InFlightOrderTracker } from "../src/order-tracker.ts";
-import type { CancelAck, OrderAck, OrderRequest } from "../src/types.ts";
+import type { OrderAck, OrderRequest, OrderTerminal } from "../src/types.ts";
 
-test("takeover experiment: late ACK is rejected without blocking the following CancelAck", () => {
+test("takeover experiment: late ACK and terminal preserve the cancel intent", () => {
   const tracker = new InFlightOrderTracker();
   tracker.trackSubmission("CLIENT-EXPERIMENT-1", request());
 
   assert.deepEqual(statuses(tracker), ["SUBMITTED"]);
-  assert.equal(tracker.requestCancelOpenOrders()[0]?.status, "CANCEL_REQUESTED");
+  assert.equal(tracker.requestCancelOpenOrders()[0]?.cancelRequested, true);
 
-  assert.throws(() => tracker.processAck(orderAck()), /not awaiting acknowledgment/);
-  assert.equal(tracker.get("CLIENT-EXPERIMENT-1")?.status, "CANCEL_REQUESTED");
+  tracker.processAck(orderAck());
+  assert.equal(tracker.get("CLIENT-EXPERIMENT-1")?.status, "ACKED");
+  assert.equal(tracker.get("CLIENT-EXPERIMENT-1")?.cancelRequested, true);
 
-  const canceled = tracker.processCancelAck(cancelAck());
+  const canceled = tracker.processTerminal(terminal());
   assert.equal(canceled.exchangeOrderId, "VENUE-EXPERIMENT-1");
   assert.equal(canceled.status, "CANCELED");
 });
@@ -44,7 +45,7 @@ function orderAck(): OrderAck {
   };
 }
 
-function cancelAck(): CancelAck {
+function terminal(): OrderTerminal {
   return {
     clientOrderId: "CLIENT-EXPERIMENT-1",
     exchangeOrderId: "VENUE-EXPERIMENT-1",

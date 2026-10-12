@@ -76,8 +76,8 @@ export class SimulatedExchange implements ExecutionVenue {
     }
     order.status = "CANCELED";
     await this.emit({
-      type: "CANCEL_ACK",
-      ack: { clientOrderId, exchangeOrderId: order.exchangeOrderId, status: "CANCELED", ts: Date.now() }
+      type: "ORDER_TERMINAL",
+      terminal: { clientOrderId, exchangeOrderId: order.exchangeOrderId, status: "CANCELED", ts: Date.now() }
     });
   }
 

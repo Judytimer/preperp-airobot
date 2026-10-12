@@ -1,6 +1,7 @@
 # Monad / Perpl Execution Plan
 
-> Status: frozen implementation guidance for the `hackathon/monad` branch.  
+> Status: original API-forwarding plan; partially superseded on 2026-10-12.
+> Current chain-integration decisions and implemented status: [Monad / Perpl 链上交易整合](monad-chain-integration.md).
 > Scope: define the minimum Perpl execution boundary; do not redesign Trading Core.
 
 ## 1. Purpose and boundary
@@ -21,7 +22,7 @@ Recovery / Reconciliation
 
 The Core continues to own Strategy, Risk, OrderTracker, PositionBook, Recovery, and Reconciliation. It must not know about Perpl wire types, `rq`, `sn`, `cid`, WalletFill messages, or Monad transactions. All protocol translation and evidence admission belongs to the Perpl Adapter.
 
-This plan deliberately does not introduce cross margin, multi-DEX abstractions, raw blockchain transaction tracking, a finality engine, an event-sourcing rewrite, autonomous AI trading, a complex frontend, or a generic Web3 framework.
+This plan still excludes cross margin, multi-DEX abstractions, an event-sourcing rewrite, autonomous AI trading, a complex frontend, and a generic Web3 framework. The earlier exclusion of raw blockchain transaction tracking was a phase constraint, not a business invariant; the minimal transaction coordinator is now documented separately.
 
 ## 2. Frozen execution principles
 

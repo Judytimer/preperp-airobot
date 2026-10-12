@@ -22,6 +22,8 @@ export type ResearchSnapshot = {
     readonly question: string;
     readonly targetFdv: number;
     readonly yesPrice: number;
+    /** Source observation time when provenance is available. */
+    readonly yesPriceObservedAt?: number;
   };
 };
 
@@ -132,4 +134,17 @@ export type PredictionPosition = {
   averageEntryPrice: number;
   premiumAtRisk: number;
   realizedPnl: number;
+};
+
+/** Observable boundary between a research price and a paper fill. */
+export type OverlayPaperExecutionRecord = {
+  readonly clientOrderId: string;
+  readonly side: "BUY" | "SELL";
+  readonly referencePrice: number;
+  readonly fillPrice: number;
+  readonly slippageBps: number;
+  readonly fee: number;
+  readonly signalAt: number;
+  readonly submitAt: number;
+  readonly fillAt: number;
 };

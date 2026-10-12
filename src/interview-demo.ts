@@ -59,8 +59,8 @@ async function liquidationCancelSection(): Promise<DemoSection> {
   await drain(bot);
 
   return {
-    title: "Cancel Intent -> CancelAck -> Liquidation",
-    lines: select(logs, ["[ACK]", "[CANCEL_ACK]", "status=CANCEL_REQUESTED", "status=CANCELED", "[LIQUIDATION]", "[POSITION]"])
+    title: "Cancel Intent -> OrderTerminal -> Liquidation",
+    lines: select(logs, ["[ACK]", "[ORDER_TERMINAL]", "cancelRequested=true", "status=CANCELED", "[LIQUIDATION]", "[POSITION]"])
   };
 }
 

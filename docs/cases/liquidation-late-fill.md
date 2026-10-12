@@ -1,6 +1,6 @@
 # Liquidation × Late Fill：复现实验
 
-> **SUPERSEDED（2026-09-24）**：本实验复现的是 S1 Ghost Cancel，不是真正的 late-arrival Fill。旧实现只在本地写入 `CANCELED`，cancel intent 从未到达 `SimulatedExchange`。Stage 1.5 已改为 `CANCEL_REQUESTED → exchange CancelAck → CANCELED`，并由 venue-side cancel 阻止尚未执行的 Fill。真正的 `executedAt < cancelEffectiveAt` 且 Fill 较晚送达的 S2 留待下一轮。
+> **SUPERSEDED（2026-09-24）**：本实验复现的是 S1 Ghost Cancel，不是真正的 late-arrival Fill。旧实现只在本地写入 `CANCELED`，cancel intent 从未到达 `SimulatedExchange`。Stage 1.5 后改为 `CANCEL_REQUESTED → exchange CancelAck → CANCELED`。2026-10-06 又进一步用独立 deterministic sequence 复现并修复了 `CANCELED` 后 unique late fill 的 OrderTracker correctness failure。**当前行为以 [OrderTracker 终态迟到成交](order-tracker-late-fill.md) 和当前源码为准。**
 
 ## Scope
 
@@ -33,19 +33,19 @@ SIM-1 BUY fill
 | liquidation fill | `CANCELED` | `FLAT` |
 | delayed exchange fill | `CANCELED` | `FLAT` |
 
-`SimulatedExchange` 已经创建并排队的 Fill promise 不会因本地 `cancelOpenOrders()` 而消失。Fill 仍会到达 Bot；当前 `InFlightOrderTracker.processFill()` 因订单已是 `CANCELED` 而返回 `accepted=false`，所以该 Fill 不进入 `PositionBook`。
+`SimulatedExchange` 在当时实现中已经创建并排队的 Fill promise 不会因本地 `cancelOpenOrders()` 而消失。Fill 仍会到达 Bot；**当时的** `InFlightOrderTracker.processFill()` 因订单已是 `CANCELED` 而返回 `accepted=false`，所以该 Fill 不进入 `PositionBook`。
 
 ## Broken invariant / unresolved semantic
 
 > 本地 `CANCELED` 状态不能证明交易所侧没有发生成交。
 
-当前实现把本地取消状态当成拒绝后续 Fill 的充分条件。如果这个 late Fill 代表交易所已经发生且随后才送达的成交事实，系统会漏记真实 exposure，并错误地保持 `FLAT`。
+当时实现把本地取消状态当成拒绝后续 Fill 的充分条件。如果这个 late Fill 代表交易所已经发生且随后才送达的成交事实，系统会漏记真实 exposure，并错误地保持 `FLAT`。这一旧行为已经由后续 `order-tracker-late-fill.md` 中的修复取代。
 
-本实验不决定 late Fill 应被接受还是拒绝。下一步必须先明确 Cancel ACK、撮合时间与事件到达时间的语义，再决定状态机和 reconciliation 规则。
+本实验当时不决定 late Fill 应被接受还是拒绝。后续已经先解决了本地 correctness：已知身份、唯一且数量合法的 CANCELED 后 late Fill 可以补记，同时保持订单终态。交易所级 `executionAt / cancelEffectiveAt / receivedAt` 时间语义仍属于延期研究。
 
 ## Stage 1.5 replacement evidence
 
-当前 deterministic test 为 `exchange-confirmed cancel prevents the ghost fill after liquidation`：
+Stage 1.5 当时的 replacement test 为 `exchange-confirmed cancel prevents the ghost fill after liquidation`：
 
 ```text
 SIM-2 ACK

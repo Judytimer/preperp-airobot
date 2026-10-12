@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Judytimer/preperp-airobot/schemas/strategy-lab-v1-manifest.schema.json",
+  "title": "Strategy Lab v1 Prospective Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "manifestId",
+    "registeredAt",
+    "repositoryCommit",
+    "market",
+    "token",
+    "listing",
+    "supply",
+    "sources",
+    "protocol",
+    "execution",
+    "outcome"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "manifestId": { "type": "string", "minLength": 1 },
+    "registeredAt": { "$ref": "#/$defs/timestamp" },
+    "repositoryCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "market": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["marketId", "question", "marketUrl", "rulesUrl", "createdAt", "activeAtRegistration", "marketType", "targetFdv", "yesTokenId"],
+      "properties": {
+        "marketId": { "type": "string", "minLength": 1 },
+        "question": { "type": "string", "minLength": 1 },
+        "marketUrl": { "$ref": "#/$defs/httpsUrl" },
+        "rulesUrl": { "$ref": "#/$defs/httpsUrl" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "activeAtRegistration": { "type": "boolean" },
+        "marketType": { "const": "FDV_AFTER_LAUNCH" },
+        "targetFdv": { "type": "number", "exclusiveMinimum": 0 },
+        "yesTokenId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "token": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "identifier", "classification", "classificationSourceUrl"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1 },
+        "identifier": { "type": "string", "minLength": 1 },
+        "classification": { "const": "MEME" },
+        "classificationSourceUrl": { "$ref": "#/$defs/httpsUrl" }
+      }
+    },
+    "listing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listingAt", "binanceSymbol", "announcementUrl"],
+      "properties": {
+        "listingAt": { "$ref": "#/$defs/timestamp" },
+        "binanceSymbol": { "type": "string", "pattern": "^[A-Z0-9]+USDT$" },
+        "announcementUrl": { "$ref": "#/$defs/httpsUrl" }
+      }
+    },
+    "supply": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["totalSupply", "observedAt", "sourceUrl", "verificationMethod"],
+      "properties": {
+        "totalSupply": { "type": "number", "exclusiveMinimum": 0 },
+        "observedAt": { "$ref": "#/$defs/timestamp" },
+        "sourceUrl": { "$ref": "#/$defs/httpsUrl" },
+        "verificationMethod": { "enum": ["ONCHAIN_TOTAL_SUPPLY", "OFFICIAL_TOKENOMICS"] }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spot", "yes"],
+      "properties": {
+        "spot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "interval", "klinesUrl"],
+          "properties": {
+            "provider": { "const": "BINANCE_SPOT" },
+            "interval": { "const": "1m" },
+            "klinesUrl": { "$ref": "#/$defs/httpsUrl" }
+          }
+        },
+        "yes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "marketDataUrl"],
+          "properties": {
+            "provider": { "const": "POLYMARKET_LAST_TRADE" },
+            "marketDataUrl": { "type": "string", "pattern": "^wss://" }
+          }
+        }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formalOneMinuteVersion", "strategyImplementation", "spotRiseTriggerPct", "exitYesPrice", "riskImplementation", "maxRiskBudget"],
+      "properties": {
+        "formalOneMinuteVersion": { "const": "1.0.0" },
+        "strategyImplementation": { "const": "MemePredictionOverlayStrategy" },
+        "spotRiseTriggerPct": { "const": 0.5 },
+        "exitYesPrice": { "const": 0.7 },
+        "riskImplementation": { "const": "OverlayRiskManager" },
+        "maxRiskBudget": { "const": 100 }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assumptionVersion", "primarySlippageBps", "sensitivitySlippageBps", "feeModel", "fillSemantics"],
+      "properties": {
+        "assumptionVersion": { "const": "1.0.0" },
+        "primarySlippageBps": { "const": 50 },
+        "sensitivitySlippageBps": {
+          "type": "array",
+          "prefixItems": [{ "const": 0 }, { "const": 100 }],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "feeModel": { "const": "ZERO" },
+        "fillSemantics": { "const": "FULL_FILL_LIMITATION" }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["measurementAt", "rule", "rulesCapturedAt", "rulesUrl"],
+      "properties": {
+        "measurementAt": { "$ref": "#/$defs/timestamp" },
+        "rule": { "type": "string", "minLength": 1 },
+        "rulesCapturedAt": { "$ref": "#/$defs/timestamp" },
+        "rulesUrl": { "$ref": "#/$defs/httpsUrl" }
+      }
+    }
+  },
+  "$defs": {
+    "timestamp": { "type": "number", "minimum": 0 },
+    "httpsUrl": { "type": "string", "pattern": "^https://" }
+  }
+}

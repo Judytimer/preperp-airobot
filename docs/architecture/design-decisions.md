@@ -1,5 +1,6 @@
 # 关键架构决策
 
+> 更新时间：2026-10-07  
 > 只记录经过当前源码、确定性 Failure Case 和后期 Repo Reality 审计仍然成立的稳定判断。
 
 ## 1. 当前代码事实优先于旧计划
@@ -48,17 +49,21 @@ Local mirror
 Intent
 ```
 
-## 5. 本地状态不能抹掉权威成交事实
+## 5. 本地状态不能抹掉权威成交事实 `[IMPLEMENTED / TRACKER-LEVEL VERIFIED]`
 
 Liquidation × Late Fill 实验暴露的核心 invariant：
 
 > 本地订单状态不能静默抹掉一个有效、唯一、来自交易所侧的成交事实。
 
-## 6. Command 完成不等于 ACK
+2026-10-06 的确定性复现证明了一个更具体的实现问题：旧 `processFill` 在 `CANCELED` 分支先返回，导致 unique late fill 被静默丢弃，且 fillId 去重不变量也会被终态分支短路。当前实现先做 fillId 幂等，再做身份与数量校验；`CANCELED` 在 `originalQty - filledQty` 预算内继续修正成交记账，但保持终态，因此不会重新进入 `getOpenOrders()`。
 
-`submit()` 返回只表示命令调用完成。ACK / Fill / CancelAck 必须通过独立 execution event 推进状态。
+当前证据等级要区分：OrderTracker deterministic regression 已覆盖该行为；Bot 的通用 accepted-Fill 路径会继续写入 PositionBook，但还没有单独增加一条 late-fill Bot-level 专项 integration regression。
 
-## 7. Ambiguous Submit 不能靠通用 Retry
+## 6. Command 完成不等于 ACK `[IMPLEMENTED]`
+
+`submit()` 返回只表示命令调用完成。ACK / Fill / ORDER_TERMINAL 必须通过独立 execution event 推进状态；终态覆盖 `CANCELED / EXPIRED / EXPIRED_IN_MATCH / REJECTED`。
+
+## 7. Ambiguous Submit 不能靠通用 Retry `[PARTIAL]`
 
 ```text
 submit
@@ -68,26 +73,30 @@ submit
 → 重复订单
 ```
 
-因此 signed order submit 不使用普通自动重试；必须依赖 clientOrderId、交易所证据和 reconciliation。
+当前已实现 signed order submit 关闭普通自动重试，并在越过 venue boundary 前持久化 clientOrderId。Binance connector 会用同一个 clientOrderId 查询并观察 user stream；真钱微额 runner 在仍不确定时继续隔离观察，并在发现敞口后走权威 snapshot + reduce-only emergency flatten。
 
-## 8. clientOrderId 由 Core 提前拥有
+通用 Core 尚未把该过程抽象成可恢复的统一状态机，因此“必须依赖交易所证据收敛”仍是全局设计边界；目前完整自动收敛只属于受限的 Mainnet Micro v1 路径。
+
+## 8. clientOrderId 由 Core 提前拥有 `[IMPLEMENTED]`
 
 Core 在越过 venue boundary 前生成并持久化 `clientOrderId`，Exchange/venue 再绑定 `exchangeOrderId`。即使 ACK 丢失，本地仍知道自己刚刚提交的是哪张订单。
 
-## 9. Risk 必须看 Projected Position
+## 9. Risk 必须看 Projected Position `[IMPLEMENTED]`
 
 风控读取 filled Position + unresolved order remaining quantity，避免 Fill 延迟期间误判“还有仓位空间”并重复下单。
 
-## 10. Reconciliation 不等于 Recovery
+## 10. Reconciliation 不等于 Recovery `[RECONCILIATION IMPLEMENTED / RECOVERY DEFERRED]`
 
 Reconciliation：本地和交易所哪里不一致？  
 Recovery：拿到足够权威证据后，怎样安全收敛并重新允许交易？
 
-当前已有只读 reconciliation 和 Recovery Evidence contract；完整 recovery mutation 仍延期。
+当前已有只读 reconciliation 和 Recovery Evidence contract；`validateRecoveryEvidence` 只校验证据是否足够，不负责修改本地状态、决定如何收敛或解除 recovery gate。完整 recovery mutation / convergence 仍延期。
 
-## 11. 不确定时 Fail Closed
+## 11. 不确定时 Fail Closed `[RESTART IMPLEMENTED / RUNTIME PARTIAL]`
 
-重启或网络异常后，如果不能证明 unresolved order 的最终状态，进入 `RECOVERY_REQUIRED` 并停止新交易。
+当前已实现的是：**重启后**如果 checkpoint 里仍有 unresolved order，则进入 `RECOVERY_REQUIRED` 并停止新交易。
+
+运行期网络异常 / ambiguous submit 应遵循同样的 fail-closed 原则，但目前还没有统一实现成自动的 `recoveryRequired = true` 状态转换。
 
 ## 12. Checkpoint 不等于完整事件历史
 
@@ -107,7 +116,7 @@ Exchange Reconciliation
 
 ## 13. 到达时间不等于撮合时间
 
-真正的 S2 cancel/fill race 可能是先撮合、后取消生效、Fill 更晚才到本地。未来需要区分 `executionAt`、`cancelEffectiveAt`、`receivedAt`。
+2026-10-06 已用本地确定性事件序列复现并修复“CancelAck 后 unique Fill 晚到”的 OrderTracker correctness failure。但这不等于已经完整建模交易所时间语义：真实 S2 cancel/fill race 仍可能是先撮合、后取消生效、Fill 更晚才到本地；只有 authenticated venue evidence 证明需要时，才引入 `executionAt`、`cancelEffectiveAt`、`receivedAt`。
 
 ## 14. Schema Taste 不等于工程债
 
@@ -136,3 +145,7 @@ Research Signal
 ```
 
 `Trading Thesis → PerpIntent` 仍是业务语义，不允许代码生成工具自行补全。
+
+`Perp Expression v1.0.0` 已把该边界实现成显式 admission contract。一个在 Candidate T0 之前冻结的 policy 必须选择 `SIGNAL_ONLY / DIRECTIONAL_PROXY / HEDGE`，并在执行模式下显式给出 side、风险预算、杠杆上限、stop distance 和有效期。没有 policy、post-hoc policy 或 symbol/market mismatch 都不生成 intent。
+
+这只解决“如何安全表达已批准的业务语义”，不替业务研究决定方向。当前 Crypto FDV Variant 没有 active perp policy，因此仍不能声称 `BUY_YES → LONG perp`。
